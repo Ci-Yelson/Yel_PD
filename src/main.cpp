@@ -20,6 +20,11 @@ igl::opengl::glfw::Viewer g_Viewer;
 
 int main(int argc, char** argv)
 {
+#ifndef EIGEN_DONT_PARALLELIZE
+    Eigen::setNbThreads(PD_EIGEN_NUM_THREADS);
+    Eigen::initParallel();
+#endif
+
     if (argc < 2) {
         std::cout << "USAGE: [.EXE] [CONFIGJSON]" << std::endl;
         return -1;

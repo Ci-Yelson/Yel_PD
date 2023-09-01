@@ -31,9 +31,9 @@ void FloatMemCpy(int n, float* source, float* target);
 //  Struct CUDAMatrixVectorMultiplier
 ///////////////////////////////////////////////////////////////////////////////////////////
 struct CUDAMatrixVectorMultiplier {
-    inline static bool cublasLibInitialized = false;
-    inline static cublasHandle_t cublasLibHandle = 0;
-    inline static PD::PDScalar cublasZero = 0.0;
+    bool cublasLibInitialized = false;
+    cublasHandle_t cublasLibHandle = 0;
+    PD::PDScalar cublasZero = 0.0;
 
     unsigned int m_numCols, m_numRows;
 
@@ -126,7 +126,6 @@ public:
     void bufferMap(float* inData, int length, cudaMemcpyKind cuMemcpykind = cudaMemcpyHostToDevice)
     {
         if (bufferInitifalized) {
-            spdlog::info(">>> CUDASparseMatrixVectorMultiplier::bufferMap() - length = {}", length);
             checkCudaErrors(cudaMemcpy(m_cudaVec, inData, sizeof(float) * length, cuMemcpykind));
 
             // Copy from inData to m_glArrayPtr while casting from PDScalar to float

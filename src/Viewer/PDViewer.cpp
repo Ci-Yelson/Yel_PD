@@ -84,8 +84,8 @@ bool PDViewer::pre_draw()
             m_imguiContext->pre_render();
             m_frameBuffer->bind();
         }
-
-        { // update mesh data
+        { // simulator step
+            PROFILE("SIMULATOR_STEP");
             if (!m_sim.get()) {
                 spdlog::error("ERROR: PDViewer::pre_draw - Not find simulator instance!");
                 return false;
@@ -94,6 +94,10 @@ bool PDViewer::pre_draw()
                 g_InteractState.isSingleStep = false;
                 m_sim->Step();
             }
+        }
+
+        { // update mesh data
+            PROFILE("IGL_SetMesh");
             m_sim->IGL_SetMesh(viewer);
         }
         {

@@ -44,6 +44,8 @@ cmake-build*
 
 debug/*
 logs
+.vscode
+.xmake
 .cache
 test*
 build.log
