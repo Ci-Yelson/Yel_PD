@@ -270,6 +270,34 @@ EigenMatrix3 HRPDTetMesh::GetP(int tInd)
     return FStar.transpose();
 }
 
+EigenMatrix3 HRPDTetMesh::GetP(int tInd, EigenMatrix3 edges)
+{
+    // For used vertices.
+    // Compute the deformation gradient (current edges times inverse of original edges)
+    Eigen::Matrix<PDScalar, 3, 3> F = edges * m_restEdgesInv[tInd];
+    // Compute SVD
+    Eigen::JacobiSVD<Eigen::Matrix<PDScalar, 3, 3>> svd(F, Eigen::ComputeFullU | Eigen::ComputeFullV);
+    PD3dVector S = svd.singularValues();
+    // Clamp singular values
+    auto clamp = [](PDScalar x, PDScalar min, PDScalar max) {
+        return std::max(min, std::min(max, x));
+    };
+    S(0) = clamp(S(0), m_minStrain, m_maxStrain);
+    S(1) = clamp(S(1), m_minStrain, m_maxStrain);
+    S(2) = clamp(S(2), m_minStrain, m_maxStrain);
+    if ((svd.matrixU() * svd.matrixV()).determinant() < 0.0)
+        S(2) = -S(2);
+
+    // Compute clamped deformation gradient
+    Eigen::Matrix<PDScalar, 3, 3> FStar = svd.matrixU() * S.asDiagonal() * svd.matrixV().transpose();
+
+    if (FStar.hasNaN()) {
+        FStar.setIdentity();
+    }
+
+    return FStar.transpose();
+}
+
 PDScalar HRPDTetMesh::GetPDEnergy(PDPositions& positions, int tInd)
 {
     // positions - [4 x 3]
@@ -324,7 +352,7 @@ void HRPDTetMesh::IGL_SetMesh(igl::opengl::glfw::Viewer* viewer)
 {
     // spdlog::info(">>> HRPDTetMesh::IGL_SetMesh()");
     // ==================== Compute color ====================
-    { 
+    {
         m_colors.resize(m_positions.rows(), 1);
         // [todo]
         Eigen::MatrixXd disp_norms = (m_positions - m_restpose_positions).cast<double>().rowwise().norm();
@@ -361,7 +389,7 @@ void HRPDTetMesh::IGL_SetMesh(igl::opengl::glfw::Viewer* viewer)
         spdlog::info(">>> HRPDTetMesh::IGL_SetMesh() - meshgl.vbo_V_ambient = {}", viewer->data(m_meshID).meshgl.vbo_V_ambient);
         spdlog::info(">>> HRPDTetMesh::IGL_SetMesh() - meshgl.vbo_V_diffuse = {}", viewer->data(m_meshID).meshgl.vbo_V_diffuse);
         spdlog::info(">>> HRPDTetMesh::IGL_SetMesh() - meshgl.vbo_V_specular = {}", viewer->data(m_meshID).meshgl.vbo_V_specular);
-        
+
         if (m_GPUBufferMapper_V) delete m_GPUBufferMapper_V;
         m_GPUBufferMapper_V = new CUDABufferMapping();
         m_GPUBufferMapper_V->initBufferMap(m_positions.size() * sizeof(float), viewer->data(m_meshID).meshgl.vbo_V);
@@ -372,63 +400,91 @@ void HRPDTetMesh::IGL_SetMesh(igl::opengl::glfw::Viewer* viewer)
             m_GPUBufferMapper_V_uv->initBufferMap(viewer->data(m_meshID).meshgl.V_uv_vbo.size() * sizeof(float), viewer->data(m_meshID).meshgl.vbo_V_uv);
         }*/
 
-        /*if (m_GPUBufferMapper_V_normals) delete m_GPUBufferMapper_V_normals;
-        m_GPUBufferMapper_V_normals = new CUDABufferMapping();
-        m_GPUBufferMapper_V_normals->initBufferMap(viewer->data(m_meshID).meshgl.V_normals_vbo.size() * sizeof(float), viewer->data(m_meshID).meshgl.vbo_V_normals);*/
-
         auto& data = viewer->data(m_meshID);
         auto& meshgl = viewer->data(m_meshID).meshgl;
 
+        if (m_GPUBufferMapper_V_normals) delete m_GPUBufferMapper_V_normals;
+        m_GPUBufferMapper_V_normals = new CUDABufferMapping();
+        m_GPUBufferMapper_V_normals->initBufferMap(meshgl.V_normals_vbo.size() * sizeof(float), meshgl.vbo_V_normals);
+
         if (m_GPUBufferMapper_V_ambient_vbo) delete m_GPUBufferMapper_V_ambient_vbo;
         m_GPUBufferMapper_V_ambient_vbo = new CUDABufferMapping();
-        m_GPUBufferMapper_V_ambient_vbo->initBufferMap(meshgl.V_ambient_vbo.size() * sizeof(float), viewer->data(m_meshID).meshgl.vbo_V_ambient);
+        m_GPUBufferMapper_V_ambient_vbo->initBufferMap(meshgl.V_ambient_vbo.size() * sizeof(float), meshgl.vbo_V_ambient);
 
         if (m_GPUBufferMapper_V_diffuse_vbo) delete m_GPUBufferMapper_V_diffuse_vbo;
         m_GPUBufferMapper_V_diffuse_vbo = new CUDABufferMapping();
-        m_GPUBufferMapper_V_diffuse_vbo->initBufferMap(meshgl.V_diffuse_vbo.size() * sizeof(float), viewer->data(m_meshID).meshgl.vbo_V_diffuse);
+        m_GPUBufferMapper_V_diffuse_vbo->initBufferMap(meshgl.V_diffuse_vbo.size() * sizeof(float), meshgl.vbo_V_diffuse);
 
         if (m_GPUBufferMapper_V_specular_vbo) delete m_GPUBufferMapper_V_specular_vbo;
         m_GPUBufferMapper_V_specular_vbo = new CUDABufferMapping();
-        m_GPUBufferMapper_V_specular_vbo->initBufferMap(meshgl.V_specular_vbo.size() * sizeof(float), viewer->data(m_meshID).meshgl.vbo_V_specular);
-        
+        m_GPUBufferMapper_V_specular_vbo->initBufferMap(meshgl.V_specular_vbo.size() * sizeof(float), meshgl.vbo_V_specular);
+
         g_InteractState.isBufferMapping = true;
     }
     if (g_InteractState.isBufferMapping) {
         auto& data = viewer->data(m_meshID);
         auto& meshgl = viewer->data(m_meshID).meshgl;
-        // Input:
-        //   X  #V by dim quantity
-        // Output:
-        //   X_vbo  #F*3 by dim scattering per corner
-        const auto per_corner = [&](
-                                    const Eigen::MatrixXd& X,
-                                    igl::opengl::MeshGL::RowMatrixXf& X_vbo) {
-            X_vbo.resize(data.F.rows() * 3, X.cols());
-            for (unsigned i = 0; i < data.F.rows(); ++i)
-                for (unsigned j = 0; j < 3; ++j)
-                    X_vbo.row(i * 3 + j) = X.row(data.F(i, j)).cast<float>();
-        };
 
-        viewer->data(m_meshID).set_mesh(m_positions.cast<double>(), m_triangles);
-        //viewer->data(m_meshID).dirty = 0;
-        viewer->data(m_meshID).set_colors(m_colors.cast<double>());
-        meshgl.V_vbo = data.V.cast<float>();
-        //Eigen::Matrix<float, -1, 3, Eigen::RowMajor> V_uv_vbo = viewer->data(m_meshID).V_uv.cast<float>();
-        //Eigen::Matrix<float, -1, 3, Eigen::RowMajor> V_normals_vbo = viewer->data(m_meshID).V_normals.cast<float>();
-        //per_corner(data.V_material_ambient, meshgl.V_ambient_vbo);
-        //per_corner(data.V_material_diffuse, meshgl.V_diffuse_vbo);
-        //per_corner(data.V_material_specular, meshgl.V_specular_vbo);
+        { // Position update
+            viewer->data(m_meshID).set_mesh(m_positions.cast<double>(), m_triangles);
+            meshgl.V_vbo = m_positions.cast<float>();
+            m_GPUBufferMapper_V->bufferMap(meshgl.V_vbo.data(), meshgl.V_vbo.size());
+            meshgl.V_normals_vbo = data.V_normals.cast<float>();
+            m_GPUBufferMapper_V_normals->bufferMap(meshgl.V_normals_vbo.data(), meshgl.V_normals_vbo.size());
+        }
 
-        m_GPUBufferMapper_V->bufferMap(meshgl.V_vbo.data(), meshgl.V_vbo.size());
-        //m_GPUBufferMapper_V_uv->bufferMap(V_uv_vbo.data(), V_uv_vbo.size());
-        //m_GPUBufferMapper_V_normals->bufferMap(V_normals_vbo.data(), V_normals_vbo.size());
-        //m_GPUBufferMapper_V_ambient_vbo->bufferMap(meshgl.V_ambient_vbo.data(), meshgl.V_ambient_vbo.size());
-        //m_GPUBufferMapper_V_diffuse_vbo->bufferMap(meshgl.V_diffuse_vbo.data(), meshgl.V_diffuse_vbo.size());
-        //m_GPUBufferMapper_V_specular_vbo->bufferMap(meshgl.V_specular_vbo.data(), meshgl.V_specular_vbo.size());
-        //viewer->data(m_meshID).dirty = igl::opengl::MeshGL::DIRTY_TEXTURE;
-        //viewer->data(m_meshID).dirty = igl::opengl::MeshGL::DIRTY_TEXTURE;
-        viewer->data(m_meshID).dirty = igl::opengl::MeshGL::DIRTY_DIFFUSE | igl::opengl::MeshGL::DIRTY_SPECULAR | igl::opengl::MeshGL::DIRTY_AMBIENT;
-        //viewer->data(m_meshID).dirty = 0;
+        {
+            // UV -- not used
+            // m_GPUBufferMapper_V_uv->bufferMap(V_uv_vbo.data(), V_uv_vbo.size());
+        }
+
+        { // Colors update
+            // viewer->data(m_meshID).set_colors(m_colors.cast<double>());
+            // using MatrixXd = Eigen::MatrixXd;
+            // // Ambient color should be darker color
+            // const auto ambient = [](const MatrixXd& C) -> MatrixXd {
+            //     MatrixXd T = 0.1 * C;
+            //     T.col(3) = C.col(3);
+            //     return T;
+            // };
+            // // Specular color should be a less saturated and darker color: dampened
+            // // highlights
+            // const auto specular = [](const MatrixXd& C) -> MatrixXd {
+            //     const double grey = 0.3;
+            //     MatrixXd T = grey + 0.1 * (C.array() - grey);
+            //     T.col(3) = C.col(3);
+            //     return T;
+            // };
+            // for (unsigned i = 0; i < data.V_material_diffuse.rows(); ++i) {
+            //     // m_colors.cols() == 3
+            //     data.V_material_diffuse.row(i) << m_colors.row(i), 1;
+            // }
+            // data.V_material_ambient = ambient(data.V_material_diffuse);
+            // data.V_material_specular = specular(data.V_material_diffuse);
+            // // Per-vertex material settings
+            // meshgl.V_ambient_vbo = data.V_material_ambient.cast<float>();
+            // meshgl.V_diffuse_vbo = data.V_material_diffuse.cast<float>();
+            // meshgl.V_specular_vbo = data.V_material_specular.cast<float>();
+
+            // [177K case] SET_COLORS: 0.0047059 s
+            // TICKC(SET_COLORS);
+            PD_PARALLEL_FOR
+            for (size_t i = 0; i < meshgl.V_diffuse_vbo.rows(); i++) {
+                Eigen::RowVector3f rC = m_colors.row(i).cast<float>();
+                meshgl.V_diffuse_vbo.row(i) << rC, 1;
+                meshgl.V_ambient_vbo.row(i) << (0.1 * rC), 1;
+                meshgl.V_specular_vbo.row(i) << (0.3 + 0.1 * (rC.array() - 0.3)), 1;
+            }
+
+            m_GPUBufferMapper_V_ambient_vbo->bufferMap(meshgl.V_ambient_vbo.data(), meshgl.V_ambient_vbo.size());
+            m_GPUBufferMapper_V_diffuse_vbo->bufferMap(meshgl.V_diffuse_vbo.data(), meshgl.V_diffuse_vbo.size());
+            m_GPUBufferMapper_V_specular_vbo->bufferMap(meshgl.V_specular_vbo.data(), meshgl.V_specular_vbo.size());
+
+            // TOCKC(SET_COLORS);
+        }
+
+        //  viewer->data(m_meshID).dirty = igl::opengl::MeshGL::DIRTY_DIFFUSE | igl::opengl::MeshGL::DIRTY_SPECULAR | igl::opengl::MeshGL::DIRTY_AMBIENT;
+        viewer->data(m_meshID).dirty = 0;
     }
     else {
         viewer->data(m_meshID).set_mesh(m_positions.cast<double>(), m_triangles);

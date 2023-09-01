@@ -14,6 +14,79 @@ extern Util::Profiler g_PreComputeProfiler;
 
 namespace PD {
 
+void SubspaceBuilder::Init(std::shared_ptr<HRPDTetMesh> mesh)
+{
+    m_mesh = mesh;
+    assert(m_mesh->m_tets.rows() != 0);
+    {
+        m_sampler.Init(m_mesh->m_restpose_positions, m_mesh->m_triangles, m_mesh->m_tets);
+        m_velocitiesRepulsion.resize(m_mesh->m_velocities.rows(), m_mesh->m_velocities.cols());
+    }
+    { // computeMassMatrix() and computeWeightMatrix()
+        int _N = m_mesh->m_positions.rows();
+        int _Nt = m_mesh->m_tets.rows();
+        // -- For position space
+        // [N x N]
+        m_massMatrixForPos.resize(_N, _N);
+        std::vector<PDSparseMatrixTriplet> massTrisPos(_N);
+        PD_PARALLEL_FOR
+        for (int v = 0; v < _N; v++) {
+            massTrisPos[v] = { v, v, m_mesh->m_vertexMasses(v, 0) };
+        }
+        m_massMatrixForPos.setFromTriplets(massTrisPos.begin(), massTrisPos.end());
+        m_massMatrixForPos.makeCompressed();
+
+        // -- For projection space
+        m_massMatrixForProj.resize(_Nt * 3, _Nt * 3);
+        m_massMatrixDiagForProj.resize(_Nt * 3);
+        m_weightMatrixForProj.resize(_Nt * 3, _Nt * 3);
+        m_weightMatrixDiagForProj.resize(_Nt * 3);
+        std::vector<PDSparseMatrixTriplet> massTrisProj(_Nt * 3);
+        std::vector<PDSparseMatrixTriplet> weightTris(_Nt * 3);
+        PD_PARALLEL_FOR
+        for (int tid = 0; tid < _Nt; ++tid) {
+            double mass = 0;
+            for (int d = 0; d < 4; d++) {
+                mass += m_mesh->m_vertexMasses(m_mesh->m_tets(tid, d));
+            }
+            for (int d = 0; d < 3; d++) {
+                massTrisProj[tid * 3 + d] = { tid * 3 + d, tid * 3 + d, mass };
+                m_massMatrixDiagForProj(tid * 3 + d) = mass;
+            }
+            for (int d = 0; d < 3; d++) {
+                if (NO_WEIGHTS_IN_CONSTRUCTION) {
+                    // Currently true
+                    weightTris[tid * 3 + d] = { tid * 3 + d, tid * 3 + d, m_mesh->m_normalization_weight[tid] };
+                    m_weightMatrixDiagForProj(tid * 3 + d) = m_mesh->m_normalization_weight[tid];
+                }
+                else {
+                    weightTris[tid * 3 + d] = { tid * 3 + d, tid * 3 + d, 1.0 };
+                    m_weightMatrixDiagForProj(tid * 3 + d) = 1.0;
+                }
+            }
+        }
+        m_massMatrixForProj.setFromTriplets(massTrisProj.begin(), massTrisProj.end());
+        m_massMatrixForProj.makeCompressed();
+        m_weightMatrixForProj.setFromTriplets(weightTris.begin(), weightTris.end());
+        m_weightMatrixForProj.makeCompressed();
+
+        spdlog::info("Mass Matrix and Weight Matrix - Done.");
+    }
+
+    {
+        // build tetsPerVertex
+        // [4 x e]
+        m_tetsPerVertex.clear();
+        m_tetsPerVertex.resize(m_mesh->m_positions.rows());
+        for (int tet = 0; tet < m_mesh->m_tets.rows(); tet++) {
+            for (int v = 0; v < 4; v++) {
+                unsigned int vInd = m_mesh->m_tets(tet, v);
+                m_tetsPerVertex[vInd].push_back({ tet, v });
+            }
+        }
+    }
+}
+
 PDMatrix SubspaceBuilder::SnapshotPCA(PDMatrix& Y, PDVector& masses)
 {
     PROFILE_PREC("SnapshotPCA");
@@ -33,7 +106,7 @@ PDMatrix SubspaceBuilder::SnapshotPCA(PDMatrix& Y, PDVector& masses)
     spdlog::info("    Computing Y^T M Y...");
     PDMatrix A;
     A.resize(Y.cols(), Y.cols());
-    // TODO: When use cuda for 177k model case, numerical problem occured!
+    // TODO: When use cuda for 177k model case, numerical problem sometimes occured?
 #ifdef PD_USE_CUDA_PRE
     CUDAMatrixVectorMultiplier* yMulti;
 #endif
@@ -346,13 +419,28 @@ void SubspaceBuilder::CreateProjectionInterpolationMatrix()
     {
         m_usedVertices.resize(m_sampledConstraintInds.size() * 4);
         PD_PARALLEL_FOR
-        for (int i = 0; i < m_sampledConstraintInds.size(); i++) {
+        for (int subTetInd = 0; subTetInd < m_sampledConstraintInds.size(); subTetInd++) {
             for (int d = 0; d < 4; d++) {
-                m_usedVertices[i * 4 + d] = m_mesh->m_tets(m_sampledConstraintInds[i], d);
+                int fullTetInd = m_sampledConstraintInds[subTetInd];
+                m_usedVertices[subTetInd * 4 + d] = m_mesh->m_tets(fullTetInd, d);
             }
         }
         std::sort(m_usedVertices.begin(), m_usedVertices.end());
         m_usedVertices.erase(std::unique(m_usedVertices.begin(), m_usedVertices.end()), m_usedVertices.end());
+        m_sampledTetsForUsedVs.resize(m_sampledConstraintInds.size(), 4);
+        PD_PARALLEL_FOR
+        for (int subTetInd = 0; subTetInd < m_sampledConstraintInds.size(); subTetInd++) {
+            int fullTetInd = m_sampledConstraintInds[subTetInd];
+            for (int d = 0; d < 4; d++) {
+                for (int vsInd = 0; vsInd < m_usedVertices.size(); vsInd++) {
+                    if (m_usedVertices[vsInd] == m_mesh->m_tets(fullTetInd, d)) {
+                        m_sampledTetsForUsedVs(subTetInd, d) = vsInd;
+                        break;
+                    }
+                }
+            }
+        }
+
         m_positionsUsedVs.setZero(m_usedVertices.size(), 3);
         m_velocitiesUsedVsRepulsion.setZero(m_usedVertices.size(), 3);
         m_velocitiesUsedVs.setZero(m_usedVertices.size(), 3);
@@ -369,6 +457,7 @@ void SubspaceBuilder::CreateProjectionInterpolationMatrix()
         m_UT_used_sp = m_UT_used.sparseView(0, PD_SPARSITY_CUTOFF);
 
         PDMatrix lhsMat = A.transpose() * A; // [4kt x 4kt]
+
         // m_usedSubspaceSolverDense.compute(lhsMat);
         // if (m_usedSubspaceSolverDense.info() != Eigen::Success) {
         //     spdlog::warn("Warning: Factorization of the Dense lhs matrix for used vertex interoplation was not successful!");
@@ -469,7 +558,7 @@ void SubspaceBuilder::ProjectUsedFullspaceToSubspaceForPos(PDPositions& sub, PDP
     }
 }
 
-void SubspaceBuilder::InterpolateSubspaceToFullspafceForPos(PDPositions& posFull, PDPositions& posSub, bool usedVerticesOnly)
+void SubspaceBuilder::InterpolateSubspaceToFullspaceForPos(PDPositions& posFull, PDPositions& posSub, bool usedVerticesOnly)
 {
     // x_{full} = U * x_{sub}
     if (usedVerticesOnly) {
@@ -490,7 +579,7 @@ void SubspaceBuilder::InterpolateSubspaceToFullspafceForPos(PDPositions& posFull
         //     for (int d = 0; d < 3; d++) {
         //         db_posFull.col(d) = m_U_used_sp * posSub.col(d);
         //     }
-        //     spdlog::critical(">>> SubspaceBuilder::InterpolateSubspaceToFullspafceForPos() - Used POS Diff = {}", (db_posFull - posFull).rowwise().norm().sum());
+        //     spdlog::critical(">>> SubspaceBuilder::InterpolateSubspaceToFullspaceForPos() - Used POS Diff = {}", (db_posFull - posFull).rowwise().norm().sum());
         // }
         PD_PARALLEL_FOR
         for (int d = 0; d < 3; d++) {
@@ -521,7 +610,7 @@ void SubspaceBuilder::InterpolateSubspaceToFullspafceForPos(PDPositions& posFull
         //     for (int d = 0; d < 3; d++) {
         //         db_posFull.col(d) = m_U_sp * posSub.col(d);
         //     }
-        //     spdlog::critical(">>> SubspaceBuilder::InterpolateSubspaceToFullspafceForPos() - Full POS Diff = {}", (db_posFull - posFull).rowwise().norm().sum());
+        //     spdlog::critical(">>> SubspaceBuilder::InterpolateSubspaceToFullspaceForPos() - Full POS Diff = {}", (db_posFull - posFull).rowwise().norm().sum());
         // }
         PD_PARALLEL_FOR
         for (int d = 0; d < 3; d++) {
@@ -534,6 +623,27 @@ void SubspaceBuilder::InterpolateSubspaceToFullspafceForPos(PDPositions& posFull
         }
 #endif
     }
+}
+
+void SubspaceBuilder::GetUsedP()
+{
+    // Should update m_positionsUsedVs before.
+    m_projectionsUsedVs.resize(3 * m_sampledConstraintInds.size(), 3);
+    // TODO: If use m_positionsUsedVs to compute m_projectionsUsedVs, the "rotation artifact" becomes more obvious?
+    PD_PARALLEL_FOR
+    for (int tInd = 0; tInd < m_sampledConstraintInds.size(); tInd++) {
+        // 3d edges of tet
+        EigenMatrix3 edges;
+        edges.col(0) = (m_positionsUsedVs.row(m_sampledTetsForUsedVs(tInd, 1)) - m_positionsUsedVs.row(m_sampledTetsForUsedVs(tInd, 0)));
+        edges.col(1) = (m_positionsUsedVs.row(m_sampledTetsForUsedVs(tInd, 2)) - m_positionsUsedVs.row(m_sampledTetsForUsedVs(tInd, 0)));
+        edges.col(2) = (m_positionsUsedVs.row(m_sampledTetsForUsedVs(tInd, 3)) - m_positionsUsedVs.row(m_sampledTetsForUsedVs(tInd, 0)));
+
+        m_projectionsUsedVs.block(tInd * 3, 0, 3, 3) = m_mesh->GetP(m_sampledConstraintInds[tInd], edges);
+    }
+    // PD_PARALLEL_FOR
+    // for (int tInd = 0; tInd < m_sampledConstraintInds.size(); tInd++) {
+    //     m_projectionsUsedVs.block(tInd * 3, 0, 3, 3) = m_mesh->GetP(m_sampledConstraintInds[tInd]);
+    // }
 }
 
 }

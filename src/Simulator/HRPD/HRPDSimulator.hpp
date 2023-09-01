@@ -56,6 +56,12 @@ struct HRPDSimulator : public PDSimulator {
     PDPositions rhs1;
     // rhs2 - (UT @ M/h^2 @ U @ s) + (UT @ ST @ WI @ V @ subP)
     PDPositions rhs2;
+    // VTJTPused - VT * JT * P_{partial}
+    PDPositions VTJTPused;
+    // VPsub - V * P_{sub}
+    PDPositions VPsub;
+    PDPositions ms_s;
+    PDPositions ms_prevPositionsSub;
 
     // ----------------- UI-Operation -----------------
     // std::vector<std::shared_ptr<Entity::OperationObject>> m_operationObjects;

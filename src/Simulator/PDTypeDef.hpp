@@ -4,8 +4,8 @@
 #include <Eigen/Sparse>
 
 #ifndef EIGEN_DONT_PARALLELIZE
-#define PD_OMP_NUM_THREADS 4
-#define PD_EIGEN_NUM_THREADS 4
+#define PD_OMP_NUM_THREADS 6
+#define PD_EIGEN_NUM_THREADS 2
 #else
 #define PD_OMP_NUM_THREADS 8
 #endif

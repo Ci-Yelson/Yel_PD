@@ -33,6 +33,7 @@ struct InteractState {
     std::string simulatorType = "HRPD";
 
     bool isBufferMapping = false;
+    bool isUseFullspaceVerticesForCollisionHandling = false; // Seems not work properly
 
     // For HRPD
     struct HRPDParams {

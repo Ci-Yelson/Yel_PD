@@ -1,7 +1,7 @@
 add_rules("mode.debug", "mode.release")
 
 add_requires("spdlog", "glfw", "glad", "glew", "glm", "nlohmann_json")
-add_requires("tetgen v1.6.0", {alias = "tetgen"})
+add_requires("tetgen 1.6.0", {alias = "tetgen"})
 add_requires("libigl v2.4.0", {alias = "libigl", system = false, configs = {imgui = false}})
 
 option("PD_USE_CUDA")

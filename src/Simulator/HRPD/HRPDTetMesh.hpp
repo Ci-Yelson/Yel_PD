@@ -68,6 +68,7 @@ public:
     PDSparseMatrix GetAssemblyMatrix(bool sqrtWeights = false, bool noWeights = false);
     // positions - [4 x 3]
     EigenMatrix3 GetP(int tInd);
+    EigenMatrix3 GetP(int tInd, EigenMatrix3 edges);
     PDScalar GetPDEnergy(PDPositions& positions, int tInd);
     PDScalar GetStvkEnergy(PDPositions& positions, int tInd);
 

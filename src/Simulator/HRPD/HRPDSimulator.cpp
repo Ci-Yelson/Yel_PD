@@ -126,10 +126,7 @@ void HRPDSimulator::PreCompute()
 void HRPDSimulator::Step()
 {
     PROFILE_STEP("HRPD_STEP");
-    PDPositions s;
-    PDPositions oldPosSub = m_positionsSubspace;
-    PDPositions tempAuxils;
-    PDPositions tempSolution;
+    ms_prevPositionsSub = m_positionsSubspace;
     bool _debug = false;
 
     auto& _sub = m_subspaceBuilder;
@@ -138,73 +135,91 @@ void HRPDSimulator::Step()
         PROFILE_STEP("GET_INERTIA_s");
         if (_debug) spdlog::info("> HRPDSimulator::Step() - GET_INERTIA_s");
         if (m_collisionCorrection) {
-            // Get actual velocities for used vertices
-            _sub.InterpolateSubspaceToFullspafceForPos(_sub.m_velocitiesUsedVs, m_velocitiesSubspace, true);
-            // Remove tangential movement and add repulsion movement from collided vertices
-            PD_PARALLEL_FOR
-            for (int v = 0; v < _sub.m_velocitiesUsedVs.rows(); v++) {
-                if (_sub.m_velocitiesUsedVsRepulsion.row(v).norm() > 1e-12) {
-                    PD3dVector curV = _sub.m_velocitiesUsedVs.row(v);
-                    PD3dVector corrV = _sub.m_velocitiesUsedVsRepulsion.row(v);
-                    PDVector tangentialV = curV - curV.dot(corrV) * corrV;
-                    tangentialV *= (1.0 - m_frictionCoeff);
-                    tangentialV += corrV * m_repulsionCoeff;
-                    _sub.m_velocitiesUsedVs.row(v) = tangentialV;
+            if (g_InteractState.isUseFullspaceVerticesForCollisionHandling) {
+                auto& vel = m_mesh->m_velocities;
+                auto& velRepulsion = _sub.m_velocitiesRepulsion;
+                // Remove tangential movement and add repulsion movement from collided vertices
+                PD_PARALLEL_FOR
+                for (int v = 0; v < vel.rows(); v++) {
+                    if (velRepulsion.row(v).norm() > 1e-12) {
+                        PD3dVector curV = vel.row(v);
+                        PD3dVector corrV = velRepulsion.row(v);
+                        PDVector tangentialV = curV - curV.dot(corrV) * corrV;
+                        tangentialV *= (1.0 - m_frictionCoeff);
+                        tangentialV += corrV * m_repulsionCoeff;
+                        vel.row(v) = tangentialV;
+                    }
                 }
+                // Project back to subspace
+                _sub.ProjectFullspaceToSubspaceForPos(m_velocitiesSubspace, vel);
             }
-            // Project back to subspace
-            PD_PARALLEL_FOR
-            for (int d = 0; d < 3; d++) {
-                m_velocitiesSubspace.col(d) = _sub.m_usedSubspaceSolverSparse.solve(_sub.m_UT_used * _sub.m_velocitiesUsedVs.col(d));
+            else {
+                // Get actual velocities for used vertices
+                _sub.InterpolateSubspaceToFullspaceForPos(_sub.m_velocitiesUsedVs, m_velocitiesSubspace, true);
+                // Remove tangential movement and add repulsion movement from collided vertices
+                PD_PARALLEL_FOR
+                for (int v = 0; v < _sub.m_velocitiesUsedVs.rows(); v++) {
+                    if (_sub.m_velocitiesUsedVsRepulsion.row(v).norm() > 1e-12) {
+                        PD3dVector curV = _sub.m_velocitiesUsedVs.row(v);
+                        PD3dVector corrV = _sub.m_velocitiesUsedVsRepulsion.row(v);
+                        PD3dVector corrVDir = corrV.normalized();
+                        PDVector tangentialV = curV - curV.dot(corrVDir) * corrVDir;
+                        tangentialV *= (1.0 - m_frictionCoeff);
+                        tangentialV += corrV * m_repulsionCoeff;
+                        _sub.m_velocitiesUsedVs.row(v) = tangentialV;
+                    }
+                }
+                // Project back to subspace
+                _sub.ProjectUsedFullspaceToSubspaceForPos(m_velocitiesSubspace, _sub.m_velocitiesUsedVs);
             }
             m_collisionCorrection = false;
         }
-        s = m_positionsSubspace + m_dt * m_velocitiesSubspace + m_dt2 * (m_fExtWeightedSubspace + m_fGravityWeightedSubspace);
+        ms_s = m_positionsSubspace + m_dt * m_velocitiesSubspace + m_dt2 * (m_fExtWeightedSubspace + m_fGravityWeightedSubspace);
         if (m_rayleighDampingAlpha > 0) {
-            s -= m_dt * m_rayleighDampingAlpha * m_velocitiesSubspace;
+            ms_s -= m_dt * m_rayleighDampingAlpha * m_velocitiesSubspace;
         }
-        m_positionsSubspace = s;
+        m_positionsSubspace = ms_s;
         // Get actual positions for used vertices
-        _sub.InterpolateSubspaceToFullspafceForPos(_sub.m_positionsUsedVs, m_positionsSubspace, true);
+        if (g_InteractState.isUseFullspaceVerticesForCollisionHandling) {
+            _sub.InterpolateSubspaceToFullspaceForPos(m_mesh->m_positions, m_positionsSubspace, false);
+        }
+        else {
+            _sub.InterpolateSubspaceToFullspaceForPos(_sub.m_positionsUsedVs, m_positionsSubspace, true);
+        }
         // Correct vertex positions of gripped and collided vertices
-        handleGripAndCollisionsUsedVs(s, true);
+        handleGripAndCollisionsUsedVs(ms_s, true);
     }
 
-    // rhs0 - (UT @ M @ U) /h^2 @ s
-    rhs0 = m_subspaceRHSSparse_mom * m_dt2inv * s;
+    { // rhs0 - (UT @ M @ U) /h^2 @ s
+        PROFILE_STEP("GET_RHS0");
+        rhs0 = m_subspaceRHSSparse_mom * m_dt2inv * ms_s;
+    }
     // 2. Local / global loop
     for (int i = 0; i < g_InteractState.numIterations; i++) {
         { // 2.1. Local step: Constraint projections
             PROFILE_STEP("LOCAL_ITER");
             if (_debug) spdlog::info("> HRPDSimulator::Step() - LOCAL_ITER [{}]", std::to_string(i));
-            if (i != 0) { // CollisionHandle
-                // Get actual positions for used vertices
-                _sub.InterpolateSubspaceToFullspafceForPos(_sub.m_positionsUsedVs, m_positionsSubspace, true);
-                // Correct vertex positions of gripped and collided vertices
-                // handleGripAndCollisionsUsedVs(m_positionsSubspace, true);
-            }
-
             // rhs2 - (UT @ M/h^2 @ U @ s) + (UT @ ST @ WI @ V @ subP)
             // TICK(LOCAL_STEP_TC);
             rhs2 = rhs0;
             // for (auto& sub : m_subspaceBuilders) {
             {
                 auto& sub = m_subspaceBuilder;
-                tempAuxils.resize(3 * sub.m_sampledConstraintInds.size(), 3);
-                tempSolution.resize(sub.m_V.cols(), 3);
+                VTJTPused.resize(sub.m_V.cols(), 3);
+                VPsub.resize(sub.m_V.cols(), 3);
+                sub.InterpolateSubspaceToFullspaceForPos(_sub.m_positionsUsedVs, m_positionsSubspace, true);
                 // Collect auxiliary variables for sampled constraints
-                PD_PARALLEL_FOR
-                for (int i = 0; i < sub.m_sampledConstraintInds.size(); i++) {
-                    tempAuxils.block(i * 3, 0, 3, 3) = m_mesh->GetP(sub.m_sampledConstraintInds[i]);
-                }
+                sub.GetUsedP();
                 // Set up rhs from auxiliaries and solve the system for all three columns
                 PD_PARALLEL_FOR
                 for (int d = 0; d < 3; d++) {
-                    // VT @ JT @ P_{partial}
-                    tempSolution.col(d) = sub.m_fittingSolver.solve(sub.ms_VTJT * tempAuxils.col(d));
+                    // VT * JT * P_{partial}
+                    VTJTPused.col(d) = sub.ms_VTJT * sub.m_projectionsUsedVs.col(d);
+                    // V * P_{sub}
+                    VPsub.col(d) = sub.m_fittingSolver.solve(VTJTPused.col(d));
 
                     // Apply finalization matrix and add to current rhs
-                    rhs2.col(d) += (g_InteractState.hrpdParams.wi / m_mesh->m_stiffness_weight) * sub.ms_UTSTWiV * tempSolution.col(d);
+                    rhs2.col(d) += (g_InteractState.hrpdParams.wi / m_mesh->m_stiffness_weight) * sub.ms_UTSTWiV * VPsub.col(d);
                 }
             }
             // TOCK(LOCAL_STEP_TC);
@@ -227,10 +242,10 @@ void HRPDSimulator::Step()
     { // 3. Evaluate fullspace positions and subspace velocities
         PROFILE_STEP("FULLSPACE");
         if (_debug) spdlog::info("> HRPDSimulator::Step() - FULLSPACE");
-        _sub.InterpolateSubspaceToFullspafceForPos(m_mesh->m_positions, m_positionsSubspace, false);
+        _sub.InterpolateSubspaceToFullspaceForPos(m_mesh->m_positions, m_positionsSubspace, false);
         // Util::storeData(m_mesh->m_positions, "debug/STEP/fullPos");
         // Not need to update full space velocities, just the subapce velocities is enough.
-        m_velocitiesSubspace = (m_positionsSubspace - oldPosSub) / m_dt;
+        m_velocitiesSubspace = (m_positionsSubspace - ms_prevPositionsSub) / m_dt;
     }
 
     m_frameCount++;
@@ -284,8 +299,12 @@ void HRPDSimulator::handleGripAndCollisionsUsedVs(PDPositions& s, bool update)
     bool gripCorrection = false;
     auto& pos = sub.m_positionsUsedVs;
     auto& velRepulsion = sub.m_velocitiesUsedVsRepulsion;
+    if (g_InteractState.isUseFullspaceVerticesForCollisionHandling) {
+        pos = m_mesh->m_positions;
+        velRepulsion = sub.m_velocitiesRepulsion;
+    }
     PD_PARALLEL_FOR
-    for (int v = 0; v < sub.m_positionsUsedVs.rows(); v++) {
+    for (int v = 0; v < pos.rows(); v++) {
         velRepulsion.row(v) = pos.row(v);
         // -- Floor
         if (g_InteractState.isFloorActive) {
@@ -323,25 +342,30 @@ void HRPDSimulator::handleGripAndCollisionsUsedVs(PDPositions& s, bool update)
     // User interaction - Drag
     if (g_InteractState.draggingState.isDragging) {
         if (g_InteractState.draggingState.vertex != -1) {
-            if (g_InteractState.draggingState.vertexUsed == -1) {
-                for (int i = 0; i < sub.m_positionsUsedVs.rows(); i++) {
-                    if (g_InteractState.draggingState.vertexUsed == -1) {
-                        g_InteractState.draggingState.vertexUsed = i;
-                        continue;
-                    }
-                    auto x = GetPositions().row(g_InteractState.draggingState.vertex);
-                    auto prev = sub.m_positionsUsedVs.row(g_InteractState.draggingState.vertexUsed);
-                    auto curr = sub.m_positionsUsedVs.row(i);
-                    if ((x - prev).norm() > (x - curr).norm()) {
-                        g_InteractState.draggingState.vertexUsed = i;
+            if (g_InteractState.isUseFullspaceVerticesForCollisionHandling) { // Update fullspace vertex
+                m_mesh->m_positions.row(g_InteractState.draggingState.vertex) += g_InteractState.draggingState.force.cast<PDScalar>();
+            }
+            else { // Update subspace used vertex
+                if (g_InteractState.draggingState.vertexUsed == -1) {
+                    for (int i = 0; i < sub.m_positionsUsedVs.rows(); i++) {
+                        if (g_InteractState.draggingState.vertexUsed == -1) {
+                            g_InteractState.draggingState.vertexUsed = i;
+                            continue;
+                        }
+                        auto x = GetPositions().row(g_InteractState.draggingState.vertex);
+                        auto prev = sub.m_positionsUsedVs.row(g_InteractState.draggingState.vertexUsed);
+                        auto curr = sub.m_positionsUsedVs.row(i);
+                        if ((x - prev).norm() > (x - curr).norm()) {
+                            g_InteractState.draggingState.vertexUsed = i;
+                        }
                     }
                 }
-            }
 
-            int vs = g_InteractState.draggingState.vertexUsed;
-            // double dt2 = g_InteractState.timeStep * g_InteractState.timeStep;
-            // m_positionsUsedVs.row(v) += (1.0 / dt2) * g_InteractState.draggingState.force.cast<PDScalar>();
-            sub.m_positionsUsedVs.row(vs) += g_InteractState.draggingState.force.cast<PDScalar>();
+                int vs = g_InteractState.draggingState.vertexUsed;
+                // double dt2 = g_InteractState.timeStep * g_InteractState.timeStep;
+                // m_positionsUsedVs.row(v) += (1.0 / dt2) * g_InteractState.draggingState.force.cast<PDScalar>();
+                sub.m_positionsUsedVs.row(vs) += g_InteractState.draggingState.force.cast<PDScalar>();
+            }
         }
     }
 
@@ -349,12 +373,23 @@ void HRPDSimulator::handleGripAndCollisionsUsedVs(PDPositions& s, bool update)
     // of the corrected vertices
     if (m_collisionCorrection || gripCorrection || g_InteractState.draggingState.isDragging) {
 
-        sub.ProjectUsedFullspaceToSubspaceForPos(s, sub.m_positionsUsedVs);
-        if (update) m_positionsSubspace = s;
-        Eigen::RowVector3d _old = sub.m_positionsUsedVs.row(g_InteractState.draggingState.vertexUsed);
-        sub.InterpolateSubspaceToFullspafceForPos(sub.m_positionsUsedVs, m_positionsSubspace, true);
-        Eigen::RowVector3d _new = sub.m_positionsUsedVs.row(g_InteractState.draggingState.vertexUsed);
+        // sub.ProjectUsedFullspaceToSubspaceForPos(s, sub.m_positionsUsedVs);
+        // if (update) m_positionsSubspace = s;
+        // Eigen::RowVector3d _old = sub.m_positionsUsedVs.row(g_InteractState.draggingState.vertexUsed);
+        // sub.InterpolateSubspaceToFullspaceForPos(sub.m_positionsUsedVs, m_positionsSubspace, true);
+        // Eigen::RowVector3d _new = sub.m_positionsUsedVs.row(g_InteractState.draggingState.vertexUsed);
         // spdlog::critical(">>> Handle - DRAG Vertex DIFF Module = {}", (_new - _old).norm());
+
+        if (g_InteractState.isUseFullspaceVerticesForCollisionHandling) {
+            sub.ProjectFullspaceToSubspaceForPos(s, m_mesh->m_positions);
+            if (update) m_positionsSubspace = s;
+            sub.InterpolateSubspaceToFullspaceForPos(sub.m_positionsUsedVs, m_positionsSubspace, true);
+        }
+        else {
+            sub.ProjectUsedFullspaceToSubspaceForPos(s, sub.m_positionsUsedVs);
+            if (update) m_positionsSubspace = s;
+            sub.InterpolateSubspaceToFullspaceForPos(sub.m_positionsUsedVs, m_positionsSubspace, true);
+        }
     }
 }
 

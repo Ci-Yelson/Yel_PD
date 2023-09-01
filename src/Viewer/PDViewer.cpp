@@ -392,6 +392,17 @@ void PDViewer::OperationWindow()
         }
     }
 
+    { // Fullspace Collison Handling
+        auto hrpd = dynamic_cast<HRPDSimulator*>(m_sim.get());
+        if (hrpd) {
+            bool _pre = g_InteractState.isUseFullspaceVerticesForCollisionHandling;
+            ImGui::Checkbox("Fullspace Collison Handling", &g_InteractState.isUseFullspaceVerticesForCollisionHandling);
+            if (_pre != g_InteractState.isUseFullspaceVerticesForCollisionHandling) {
+                ;
+            }
+        }
+    }
+
     ImGui::End();
 }
 
