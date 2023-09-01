@@ -2,7 +2,6 @@
 #include "helper_cuda.h"
 #include <spdlog/spdlog.h>
 
-
 __global__ void doubleToFloatMemCpyKernel(int n, int coord, double* source, float* target)
 {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -54,6 +53,21 @@ void elementWiseMultiply(int n, float* a, float* b)
 {
     elementWiseMultiplyKernel<<<(n + 255) / 256, 256>>>(n, a, b);
 }
+
+
+__global__ void FloatMemCpyKernel(int n, float* source, float* target)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < n) {
+        target[i] = source[i];
+    }
+}
+
+void FloatMemCpy(int n, float* source, float* target)
+{
+    FloatMemCpyKernel<<<(n + 255) / 256, 256>>>(n, source, target);
+}
+
 
 ///////////////////////////////////////////////////////////////////////////////////////////
 //  Struct CUDAMatrixVectorMultiplier
@@ -168,7 +182,7 @@ void CUDAMatrixVectorMultiplier::mult(const void* inData, void* outData, PD::PDS
         //     doubleToFloatDeviceCpy(N, coord, m_cudaOutVec, m_glArrayPtr);
         // }
 
-        //Copy from m_cudaOutVec to m_glArrayPtr while casting from PDScalar to float
+        // Copy from m_cudaOutVec to m_glArrayPtr while casting from PDScalar to float
         int N = m_numRows;
         if (cutoff >= 0) {
             N = cutoff;
@@ -181,7 +195,7 @@ void CUDAMatrixVectorMultiplier::mult(const void* inData, void* outData, PD::PDS
         checkCudaErrors(cudaGraphicsUnmapResources(1, &m_res, 0));
     }
 
-    cudaDeviceSynchronize();
+    checkCudaErrors(cudaDeviceSynchronize());
 }
 
 void CUDAMatrixVectorMultiplier::initBufferMap(GLuint bufferId)
@@ -200,72 +214,113 @@ void CUDAMatrixVectorMultiplier::initBufferMap(GLuint bufferId)
 ///////////////////////////////////////////////////////////////////////////////////////////
 CUDASparseMatrixVectorMultiplier::CUDASparseMatrixVectorMultiplier(PD::PDSparseMatrix& mat)
 {
-    if (!cusparseLibInitialized) {
-        cusparseCreate(&cusparseLibHandle);
-        cusparseLibInitialized = true;
-    }
-    m_numRows = mat.rows(), m_numCols = mat.cols();
-    m_nnz = mat.nonZeros();
-    checkCudaErrors(cudaMalloc((void**)&m_cudaInVec, sizeof(PD::PDScalar) * m_numCols));
-    checkCudaErrors(cudaMalloc((void**)&m_cudaOutVec, sizeof(PD::PDScalar) * m_numRows));
+    checkCudaErrors(cusparseCreate(&m_handle));
 
-    // Create the CSC data for the sparse matrix
-    PD::PDScalar* entries = new PD::PDScalar[m_nnz];
-    int* rowInds = new int[m_nnz];
-    int* colPtr = new int[m_numCols + 1];
-    unsigned int counter = 0;
-    colPtr[0] = 0;
-    for (int k = 0; k < mat.outerSize(); ++k) {
-        for (PD::PDSparseMatrix::InnerIterator it(mat, k); it; ++it) {
-            entries[counter] = it.value();
-            rowInds[counter] = it.row();
-            counter++;
-        }
-        colPtr[k + 1] = counter;
-    }
+    checkCudaErrors(cusparseCreateMatDescr(&m_descr));
+    checkCudaErrors(cusparseSetMatType(m_descr, CUSPARSE_MATRIX_TYPE_GENERAL));
+    checkCudaErrors(cusparseSetMatIndexBase(m_descr, CUSPARSE_INDEX_BASE_ZERO));
 
-    // Upload the CSC data
-    checkCudaErrors(cudaMalloc((void**)&m_cudaMatData, sizeof(PD::PDScalar) * m_nnz));
-    checkCudaErrors(cudaMemcpy(m_cudaMatData, entries, sizeof(PD::PDScalar) * m_nnz, cudaMemcpyHostToDevice));
-    checkCudaErrors(cudaMalloc((void**)&m_cudaRowInd, sizeof(int) * m_nnz));
-    checkCudaErrors(cudaMemcpy(m_cudaRowInd, rowInds, sizeof(int) * m_nnz, cudaMemcpyHostToDevice));
-    checkCudaErrors(cudaMalloc((void**)&m_cudaColPtr, sizeof(int) * (m_numCols + 1)));
-    checkCudaErrors(cudaMemcpy(m_cudaColPtr, colPtr, sizeof(int) * (m_numCols + 1), cudaMemcpyHostToDevice));
+    // Eigen sparse matrix deafult format is csc.
+    auto& M_csc = mat;
+    M_csc.makeCompressed();
+    m_num_rows = M_csc.rows();
+    m_num_cols = M_csc.cols();
+    m_num_nonzeros = M_csc.nonZeros();
 
-    // Set up description
-    checkCudaErrors(cusparseCreateMatDescr(&m_desc));
-    checkCudaErrors(cusparseSetMatType(m_desc, CUSPARSE_MATRIX_TYPE_GENERAL));
-    checkCudaErrors(cusparseSetMatIndexBase(m_desc, CUSPARSE_INDEX_BASE_ZERO));
+    checkCudaErrors(cudaMalloc(&m_M_values, sizeof(PD::PDScalar) * m_num_nonzeros));
+    checkCudaErrors(cudaMalloc(&m_M_rowInd, sizeof(int) * (m_num_rows + 1)));
+    checkCudaErrors(cudaMalloc(&m_M_colPtr, sizeof(int) * m_num_nonzeros));
+
+    checkCudaErrors(cudaMemcpy(m_M_values, M_csc.valuePtr(), sizeof(PD::PDScalar) * m_num_nonzeros, cudaMemcpyHostToDevice));
+    checkCudaErrors(cudaMemcpy(m_M_rowInd, M_csc.outerIndexPtr(), sizeof(int) * (m_num_rows + 1), cudaMemcpyHostToDevice));
+    checkCudaErrors(cudaMemcpy(m_M_colPtr, M_csc.innerIndexPtr(), sizeof(int) * m_num_nonzeros, cudaMemcpyHostToDevice));
+
+    checkCudaErrors(cusparseCreateCsc(&m_mat, m_num_rows, m_num_cols, m_num_nonzeros,
+        m_M_rowInd, m_M_colPtr, m_M_values, CUSPARSE_INDEX_32I,
+        CUSPARSE_INDEX_32I, CUSPARSE_INDEX_BASE_ZERO, CUDA_R_64F));
+
+    checkCudaErrors(cudaMalloc(&m_V_in_dv, sizeof(PD::PDScalar) * m_num_cols));
+    checkCudaErrors(cudaMalloc(&m_V_out_dv, sizeof(PD::PDScalar) * m_num_rows));
+
+    checkCudaErrors(cusparseCreateDnVec(&m_vecIn, m_num_cols, m_V_in_dv, CUDA_R_64F));
+    checkCudaErrors(cusparseCreateDnVec(&m_vecOut, m_num_rows, m_V_out_dv, CUDA_R_64F));
+
+    alpha = 1.0;
+    beta = 0.0;
+
+    // Query buffer size
+    cusparseSpMV_bufferSize(m_handle, CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha, m_mat, m_vecIn, &beta, m_vecOut, CUDA_R_64F, CUSPARSE_SPMV_ALG_DEFAULT, &bufferSize);
+
+    // Allocate buffer
+    cudaMalloc(&buffer, bufferSize);
 }
 
-void CUDASparseMatrixVectorMultiplier::mult(const void* inData, void* outData, PD::PDScalar& alpha)
+CUDASparseMatrixVectorMultiplier::~CUDASparseMatrixVectorMultiplier()
 {
-    checkCudaErrors(cublasSetVector(m_numCols, sizeof(PD::PDScalar), inData, 1, (void*)(m_cudaInVec), 1));
-    checkCudaErrors(cudaMemcpy(m_cudaInVec, inData, sizeof(PD::PDScalar) * m_numCols, cudaMemcpyHostToDevice));
+    checkCudaErrors(cusparseDestroySpMat(m_mat));
+    checkCudaErrors(cusparseDestroyDnVec(m_vecIn));
+    checkCudaErrors(cusparseDestroyDnVec(m_vecOut));
+    checkCudaErrors(cusparseDestroy(m_handle));
 
-    /*
-        NOTE:
-        We do NOT multiply with the transpose of the matrix that was passed to the constructor!!!
-        The reason that we set the operation to transpose is that cuSparse only offers a multiplication
-        for compressed sparse row (CSR) format type matrices, but the matrix mat is in compressed sparse
-        column (CSC) format.
-        However, using the CSC description of mat as a CSR description, leads to the transpose of mat.
-        Thus, multiplying with the transpose in CSR amounts to multiplying with the non-transposed in
-        CSC.
-    */
-    cusparseSpMatDescr_t matA = 0;
-    checkCudaErrors(
-        cusparseCreateCsc(&matA, m_numCols, m_numRows, m_nnz,
-            m_cudaColPtr, m_cudaRowInd, m_cudaMatData,
-            CUSPARSE_INDEX_32I, CUSPARSE_INDEX_32I, CUSPARSE_INDEX_BASE_ZERO, CUDA_R_64F));
-    cusparseDnVecDescr_t vecX = 0;
-    cusparseDnVecDescr_t vecY = 0;
-    checkCudaErrors(cusparseCreateDnVec(&vecX, m_numRows, m_cudaInVec, CUDA_R_64F));
-    checkCudaErrors(cusparseCreateDnVec(&vecY, m_numCols, m_cudaOutVec, CUDA_R_64F));
+    checkCudaErrors(cudaFree(m_M_values));
+    checkCudaErrors(cudaFree(m_M_rowInd));
+    checkCudaErrors(cudaFree(m_M_colPtr));
+    checkCudaErrors(cudaFree(m_V_in_dv));
+    checkCudaErrors(cudaFree(m_V_out_dv));
+}
 
-    checkCudaErrors(
-        cusparseSpMV(cusparseLibHandle, CUSPARSE_OPERATION_NON_TRANSPOSE,
-            &m_alpha, matA, vecX, &m_zero, vecY, CUDA_R_64F,
-            CUSPARSE_SPMV_ALG_DEFAULT, NULL));
-    checkCudaErrors(cudaMemcpy(outData, m_cudaOutVec, sizeof(PD::PDScalar) * m_numRows, cudaMemcpyDeviceToHost));
+void CUDASparseMatrixVectorMultiplier::mult(void* inData, void* outData, int coord, int cutoff)
+{
+    checkCudaErrors(cublasSetVector(m_num_cols, sizeof(PD::PDScalar), inData, 1, (void*)(m_V_in_dv), 1));
+    checkCudaErrors(cudaMemcpy(m_V_in_dv, inData, sizeof(PD::PDScalar) * m_num_cols, cudaMemcpyHostToDevice));
+    checkCudaErrors(cusparseDnVecSetValues(m_vecIn, m_V_in_dv));
+    checkCudaErrors(cusparseSpMV(m_handle, CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha, m_mat, m_vecIn, &beta, m_vecOut, CUDA_R_64F, CUSPARSE_SPMV_ALG_DEFAULT, buffer));
+    // checkCudaErrors(cusparseDnVecGetValues(m_vecOut, (void**) & m_V_out_dv));
+    checkCudaErrors(cudaMemcpy(outData, m_V_out_dv, sizeof(PD::PDScalar) * m_num_rows, cudaMemcpyDeviceToHost));
+
+    if (bufferInitifalized) {
+        // Copy from outData to m_glArrayPtr while casting from PDScalar to float
+        int N = m_num_rows;
+        if (cutoff >= 0) {
+            N = cutoff;
+        }
+        checkCudaErrors(cudaGraphicsMapResources(1, &m_res, 0));
+        size_t size;
+        checkCudaErrors(cudaGraphicsResourceGetMappedPointer((void**)&m_glArrayPtr, &size, m_res));
+        doubleToFloatDeviceCpy(N, coord, static_cast<PD::PDScalar*>(m_V_out_dv), m_glArrayPtr);
+        checkCudaErrors(cudaDeviceSynchronize());
+        checkCudaErrors(cudaGraphicsUnmapResources(1, &m_res, 0));
+    }
+    checkCudaErrors(cudaDeviceSynchronize());
+}
+
+void CUDASparseMatrixVectorMultiplier::initBufferMap(GLuint bufferId)
+{
+    spdlog::info(">>> CUDASparseMatrixVectorMultiplier::initBufferMap()");
+    m_glbufferId = bufferId;
+    glBindBuffer(GL_ARRAY_BUFFER, m_glbufferId);
+    checkCudaErrors(cudaGraphicsGLRegisterBuffer(&m_res, m_glbufferId, cudaGraphicsRegisterFlagsNone));
+    bufferInitifalized = true;
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    spdlog::info(">>> CUDASparseMatrixVectorMultiplier::initBufferMap() - After");
+}
+
+void CUDASparseMatrixVectorMultiplier::bufferMap(void* inData, int coord, int cutoff)
+{
+    checkCudaErrors(cublasSetVector(m_num_rows, sizeof(PD::PDScalar), inData, 1, (void*)(m_V_out_dv), 1));
+    checkCudaErrors(cudaMemcpy(m_V_out_dv, inData, sizeof(PD::PDScalar) * m_num_rows, cudaMemcpyHostToDevice));
+    if (bufferInitifalized) {
+        // Copy from outData to m_glArrayPtr while casting from PDScalar to float
+        int N = m_num_rows;
+        if (cutoff >= 0) {
+            N = cutoff;
+        }
+        checkCudaErrors(cudaGraphicsMapResources(1, &m_res, 0));
+        size_t size;
+        checkCudaErrors(cudaGraphicsResourceGetMappedPointer((void**)&m_glArrayPtr, &size, m_res));
+        doubleToFloatDeviceCpy(N, coord, static_cast<PD::PDScalar*>(m_V_out_dv), m_glArrayPtr);
+        checkCudaErrors(cudaDeviceSynchronize());
+        checkCudaErrors(cudaGraphicsUnmapResources(1, &m_res, 0));
+    }
+    checkCudaErrors(cudaDeviceSynchronize());
 }

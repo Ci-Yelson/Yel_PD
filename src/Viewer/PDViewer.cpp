@@ -22,19 +22,6 @@ namespace PD {
 
 void PDViewer::Setup()
 {
-    {
-        if (g_InteractState.simulatorType == "HRPD") {
-            spdlog::info("### USE HRPD SIMULATOR");
-            auto tetMesh = std::make_shared<HRPDTetMesh>(g_InteractState.meshURL);
-            m_sim = std::make_shared<HRPDSimulator>(tetMesh);
-        }
-        else if (g_InteractState.simulatorType == "QNPD") {
-            spdlog::info("### USE QNPD SIMULATOR [TODO]");
-            // auto tetMesh = std::make_shared<QNPDTetMesh>(g_InteractState.meshURL);
-            // m_sim = std::make_shared<QNPDSimulator>(tetMesh);
-        }
-    }
-
     // Config floor mesh for draw
     spdlog::info("> PDViewer::setup - Before");
     {
@@ -66,6 +53,12 @@ void PDViewer::Setup()
             viewer->data(m_floorMeshID).add_edges(p3, p4, C);
         }
     }
+    {
+        if (m_interactMeshID == -1) {
+            m_interactMeshID = viewer->append_mesh(true);
+            spdlog::info("> PDViewer::setup - m_interactMeshID = {}", m_interactMeshID);
+        }
+    }
 
     spdlog::info("> PDViewer::setup - After");
 }
@@ -81,8 +74,10 @@ bool PDViewer::pre_draw()
 {
     PROFILE("FRAME");
     m_frameTimer.startStopWatch();
+    bool _DB = false;
+    if(_DB) spdlog::info(">>> PDViewer::Frame");
+
     {
-        spdlog::info("> PDViewer::pre_draw() - 1");
         PROFILE("PRE_DRAW");
         m_predrawTimer.startStopWatch();
         { // imgui context
@@ -101,25 +96,23 @@ bool PDViewer::pre_draw()
             }
             m_sim->IGL_SetMesh(viewer);
         }
+        {
+            viewer->data(m_interactMeshID).clear();
+            if (g_InteractState.draggingState.isDragging && (viewer->core().is_animating || g_InteractState.isSingleStep)) {
+                auto vert = g_InteractState.draggingState.vertex;
+                // spdlog::info("Pre draw - g_InteractState.draggingState points: {0} {1} {2}", pos.row(vert).x(), pos.row(vert).y(), pos.row(vert).z());
+                viewer->data(m_interactMeshID).point_size = 20.f;
+                auto C = Eigen::RowVector3d(0, 1, 0);
+                viewer->data(m_interactMeshID).set_points(m_sim->GetPositions().cast<double>().row(vert), C);
+            }
+        }
         m_predrawTimer.stopStopWatch();
+        if(_DB) spdlog::info(">>> PDViewer::Frame - After pre draw");
     }
 
     { // viewer core draw mesh
-        spdlog::info("> PDViewer::pre_draw() - 2");
         PROFILE("DRAW_MESH");
         m_drawTimer.startStopWatch();
-#ifdef PD_USE_CUDA
-        spdlog::info("> PDViewer::pre_draw() - 2 - ?");
-        auto hrpd_simulator = dynamic_cast<HRPDSimulator*>(m_sim.get());
-        auto& _sub = hrpd_simulator->m_subspaceBuilder;
-        spdlog::info("> PDViewer::pre_draw() - 2 - ??");
-        if (_sub.m_vPosGPUUpdate == nullptr) {
-            spdlog::info("> PDViewer::pre_draw() - 2 - # meshgl.V_vbo = {}", viewer->data(_sub.m_mesh->m_meshID).meshgl.vbo_V);
-            _sub.InitGPUPositionBufferMap(viewer->data(_sub.m_mesh->m_meshID).meshgl.vbo_V);
-            spdlog::info("> PDViewer::pre_draw() - 2 - ###");
-        }
-        spdlog::info("> PDViewer::pre_draw() - 2 - ???");
-#endif
         for (auto& core : viewer->core_list) {
             for (auto& mesh : viewer->data_list) {
                 if (mesh.is_visible & core.id) {
@@ -128,26 +121,29 @@ bool PDViewer::pre_draw()
             }
         }
         m_drawTimer.stopStopWatch();
+        if(_DB) spdlog::info(">>> PDViewer::Frame - After draw");
     }
 
     {
-        spdlog::info("> PDViewer::pre_draw() - 3");
         PROFILE("POST_DRAW");
         m_postdrawTimer.startStopWatch();
         m_frameBuffer->unbind();
 
-        // Render window
         ImVec2 viewportPanelSize;
         { // Scene window
             ImGui::Begin("Scene");
-            GLuint textureID = m_frameBuffer->get_texture();
             viewportPanelSize = ImGui::GetContentRegionAvail();
             m_sceneWindowPos = ImGui::GetWindowPos();
             m_sceneCursorPos = ImGui::GetCursorPos();
-            ImGui::Image((void*)(intptr_t)(textureID), ImVec2{ viewportPanelSize.x, viewportPanelSize.y }, ImVec2{ 0, 1 }, ImVec2{ 1, 0 });
+            GLuint textureID = m_frameBuffer->get_texture();
+            if (textureID) {
+                ImGui::Image((void*)(intptr_t)(textureID), ImVec2{ viewportPanelSize.x, viewportPanelSize.y }, ImVec2{ 0, 1 }, ImVec2{ 1, 0 });
+            }
             isSceneInterationActive = ImGui::IsItemHovered();
             ImGui::End();
+            if (_DB) spdlog::info(">>> PDViewer::Frame - After ImGui::Image()");
         }
+        // Render window
         {
             SimulatorInfoWindow();
             OperationWindow();
@@ -155,15 +151,17 @@ bool PDViewer::pre_draw()
         }
         {
             m_imguiContext->post_render();
-            if (viewportPanelSize.x != m_sceneWindowSize.first || viewportPanelSize.y != m_sceneWindowSize.second) {
+            if (_DB) spdlog::info(">>> PDViewer::Frame - After imgui context post_render()");
+            if (!m_frameBuffer->get_texture() || (viewportPanelSize.x != m_sceneWindowSize.first || viewportPanelSize.y != m_sceneWindowSize.second)) {
                 m_sceneWindowSize = { viewportPanelSize.x, viewportPanelSize.y };
-                viewer->core().viewport = { 0, 0, m_sceneWindowSize.first, m_sceneWindowSize.second };
-                m_frameBuffer->create_buffers(viewportPanelSize.x, viewportPanelSize.y);
-                // spdlog::info(">>> Scene window size changed: ({}, {})", m_sceneWindowSize.first, m_sceneWindowSize.second);
-                // spdlog::info(">>> viewer->core().viewport = ({}, {}, {}, {})", viewer->core().viewport(0), viewer->core().viewport(1), viewer->core().viewport(2), viewer->core().viewport(3));
+                viewer->core().viewport = { 0, 0, m_sceneWindowSize.first * 1.0f, m_sceneWindowSize.second * 1.0f };
+                spdlog::info(">>> viewer->core().viewport = ({}, {}, {}, {})", viewer->core().viewport(0), viewer->core().viewport(1), viewer->core().viewport(2), viewer->core().viewport(3));
+                spdlog::info(">>> Window m_sceneWindowSize = ({}, {})", m_sceneWindowSize.first, m_sceneWindowSize.second);
+                m_frameBuffer->create_buffers(m_sceneWindowSize.first, m_sceneWindowSize.second);
             }
         }
         m_postdrawTimer.stopStopWatch();
+        if(_DB) spdlog::info(">>> PDViewer::Frame - After post draw");
     }
 
     m_frameTimer.stopStopWatch();
@@ -379,6 +377,17 @@ void PDViewer::OperationWindow()
         }
     }
 
+    { // Buffer Mapping
+        auto hrpd = dynamic_cast<HRPDSimulator*>(m_sim.get());
+        if (hrpd) {
+            bool _pre = g_InteractState.isBufferMapping;
+            ImGui::Checkbox("Buffer Mapping", &g_InteractState.isBufferMapping);
+            if (_pre != g_InteractState.isBufferMapping) {
+                ;
+            }
+        }
+    }
+
     ImGui::End();
 }
 
@@ -430,17 +439,16 @@ void PDViewer::ProfilerWindow()
     ImGui::Begin("Profiler");
     static int s_SelectedProfilerIdx = 0;
     static std::pair<const char*, Util::Profiler*> PROFILERS[] = {
-        { "Frame", &g_FrameProfiler },
         { "Simulator PreCompute", &g_PreComputeProfiler },
         { "Simulator Step", &g_StepProfiler },
+        { "Frame", &g_FrameProfiler },
     };
     Util::Profiler& prof = *PROFILERS[s_SelectedProfilerIdx].second;
 
     static int s_SelectedTimeFunc = 0;
     static std::pair<const char*, std::function<float(const Util::Profiler::Section& sec)>> s_TimeFuncs[] = {
-        { "SumTime", [](const Util::Profiler::Section& sec) { return sec._sumTime; } },
         { "LastTime", [](const Util::Profiler::Section& sec) { return sec._lastTime; } },
-        { "lastTime", [](const Util::Profiler::Section& sec) { return sec._lastTime; } },
+        { "SumTime", [](const Util::Profiler::Section& sec) { return sec._sumTime; } },
     };
 
     ImGui::SetNextItemWidth(200);

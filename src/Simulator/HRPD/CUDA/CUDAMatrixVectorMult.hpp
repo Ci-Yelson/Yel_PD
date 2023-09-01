@@ -18,14 +18,17 @@
 #include <cuda_gl_interop.h>
 #include <cuda_runtime.h>
 #include <cusparse_v2.h>
+#include "helper_cuda.h"
 
 void doubleToFloatDeviceCpy(int n, int coord, double* source, float* target);
 void elementWiseMultiply(int n, double* a, double* b);
 void doubleToFloatDeviceCpy(int n, int coord, float* source, float* target);
 void elementWiseMultiply(int n, float* a, float* b);
 
+void FloatMemCpy(int n, float* source, float* target);
+
 ///////////////////////////////////////////////////////////////////////////////////////////
-//  Struct
+//  Struct CUDAMatrixVectorMultiplier
 ///////////////////////////////////////////////////////////////////////////////////////////
 struct CUDAMatrixVectorMultiplier {
     inline static bool cublasLibInitialized = false;
@@ -58,27 +61,83 @@ public:
     void initBufferMap(GLuint bufferId);
 };
 
+///////////////////////////////////////////////////////////////////////////////////////////
+//  Struct CUDASparseMatrixVectorMultiplier
+///////////////////////////////////////////////////////////////////////////////////////////
 struct CUDASparseMatrixVectorMultiplier {
-	inline static bool cusparseLibInitialized = false;
-    inline static cusparseHandle_t cusparseLibHandle = 0;
-	cusparseMatDescr_t m_desc = 0;
+	cusparseHandle_t m_handle;
+    cusparseMatDescr_t m_descr;
+    cusparseSpMatDescr_t m_mat;
+    cusparseDnVecDescr_t m_vecIn;
+    cusparseDnVecDescr_t m_vecOut;
+    double alpha;
+    double beta;
+    size_t bufferSize;
+    void* buffer;
 
-	unsigned int m_numCols, m_numRows;
-	
-    int m_nnz;
-	PD::PDScalar* m_cudaInVec = nullptr;
-	PD::PDScalar* m_cudaOutVec = nullptr;
-	PD::PDScalar* m_cudaMatData = nullptr;
+    int m_num_rows, m_num_cols, m_num_nonzeros;
 
-	double m_alpha;
-	double m_zero;
+    void* m_M_values = nullptr;
+    void* m_M_rowInd = nullptr;
+    void* m_M_colPtr = nullptr;
 
-	int* m_cudaColPtr = nullptr;
-	int* m_cudaRowInd = nullptr;
+    void* m_V_in_dv = nullptr;
+    void* m_V_out_dv = nullptr;
+
+    bool bufferInitifalized = false;
+    GLuint m_glbufferId;
+    float* m_glArrayPtr = nullptr;
+    cudaGraphicsResource_t m_res;
 
 public:
     CUDASparseMatrixVectorMultiplier(PD::PDSparseMatrix& mat);
-    void mult(const void* inData, void* outData, PD::PDScalar& alpha);
+    ~CUDASparseMatrixVectorMultiplier();
+    void mult(void* inData, void* outData, int coord = 0, int cutoff = -1);
+    void initBufferMap(GLuint bufferId);
+    void bufferMap(void* inData, int coord = 0, int cutoff = -1);
+};
+
+struct CUDABufferMapping {
+    bool bufferInitifalized = false;
+    GLuint m_glbufferId = 0;
+    float* m_glArrayPtr = nullptr;
+    cudaGraphicsResource_t m_res = 0;
+
+    void* m_cudaVec = nullptr;
+
+public:
+    CUDABufferMapping(){}
+    ~CUDABufferMapping() {
+        if (m_cudaVec) checkCudaErrors(cudaFree(m_cudaVec));
+    }
+
+    void initBufferMap(int size, GLuint bufferId)
+    {
+        if (bufferInitifalized) return;
+        spdlog::info(">>> CUDASparseMatrixVectorMultiplier::initBufferMap() - size = {}, bufferId = {}", size, bufferId);
+        checkCudaErrors(cudaMalloc(&m_cudaVec, size));
+        m_glbufferId = bufferId;
+        glBindBuffer(GL_ARRAY_BUFFER, m_glbufferId);
+        checkCudaErrors(cudaGraphicsGLRegisterBuffer(&m_res, m_glbufferId, cudaGraphicsRegisterFlagsNone));
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+        bufferInitifalized = true;
+        spdlog::info(">>> CUDASparseMatrixVectorMultiplier::initBufferMap() - After");
+    }
+    void bufferMap(float* inData, int length, cudaMemcpyKind cuMemcpykind = cudaMemcpyHostToDevice)
+    {
+        if (bufferInitifalized) {
+            spdlog::info(">>> CUDASparseMatrixVectorMultiplier::bufferMap() - length = {}", length);
+            checkCudaErrors(cudaMemcpy(m_cudaVec, inData, sizeof(float) * length, cuMemcpykind));
+
+            // Copy from inData to m_glArrayPtr while casting from PDScalar to float
+            checkCudaErrors(cudaGraphicsMapResources(1, &m_res, 0));
+            size_t size;
+            checkCudaErrors(cudaGraphicsResourceGetMappedPointer((void**)&m_glArrayPtr, &size, m_res));
+            FloatMemCpy(length, static_cast<float*>(m_cudaVec), m_glArrayPtr);
+            checkCudaErrors(cudaDeviceSynchronize());
+            checkCudaErrors(cudaGraphicsUnmapResources(1, &m_res, 0));
+        }
+    }
 };
 
 #endif

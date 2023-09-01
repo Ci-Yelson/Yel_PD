@@ -86,15 +86,6 @@ struct SubspaceBuilder {
     // PDDenseLLTSolver m_usedSubspaceSolverDense;
     PDSparseSolver m_usedSubspaceSolverSparse;
 
-#ifdef PD_USE_CUDA
-    CUDAMatrixVectorMultiplier* m_vPosGPUUpdate = nullptr;
-    CUDAMatrixVectorMultiplier* m_usedVertexUpdate = nullptr;
-    CUDAMatrixVectorMultiplier* m_rhsEvaluator = nullptr;
-    PDMatrix m_projUsedVerts;
-    PDMatrix m_rhsEvalMat;
-    PDVector m_curTempVec;
-#endif
-
 public:
     void Init(std::shared_ptr<HRPDTetMesh> mesh)
     {
@@ -181,7 +172,6 @@ public:
 
     void InitProjection();
     void InitInterpolation();
-    void InitGPUPositionBufferMap(GLuint bufferId);
 
     void ProjectFullspaceToSubspaceForPos(PDPositions& sub, PDPositions& full);
     void ProjectUsedFullspaceToSubspaceForPos(PDPositions& sub, PDPositions& usedfull);

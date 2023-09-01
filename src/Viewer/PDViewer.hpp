@@ -26,7 +26,8 @@ struct PDViewer : public igl::opengl::glfw::ViewerPlugin {
     std::shared_ptr<PDSimulator> m_sim;
 
     bool isSceneInterationActive = true;
-    std::pair<int, int> m_sceneWindowSize = { 1280, 800 };
+    // std::pair<int, int> m_sceneWindowSize = { 1280, 800 };
+    std::pair<int, int> m_sceneWindowSize = { -1, -1 };
     ImVec2 m_sceneWindowPos;
     ImVec2 m_sceneCursorPos;
 
@@ -36,12 +37,25 @@ struct PDViewer : public igl::opengl::glfw::ViewerPlugin {
     Util::StopWatch m_postdrawTimer;
 
     // For floor
-    int m_floorMeshID{ -1 };
+    int m_floorMeshID = -1;
     float m_floorGridSize = 50.0f;
+
+    // For interact, i.g. dragging
+    int m_interactMeshID = -1;
 
 public:
     PDViewer()
     {
+        if (g_InteractState.simulatorType == "HRPD") {
+            spdlog::info("### USE HRPD SIMULATOR");
+            auto tetMesh = std::make_shared<HRPDTetMesh>(g_InteractState.meshURL);
+            m_sim = std::make_shared<HRPDSimulator>(tetMesh);
+        }
+        else if (g_InteractState.simulatorType == "QNPD") {
+            spdlog::info("### USE QNPD SIMULATOR [TODO]");
+            // auto tetMesh = std::make_shared<QNPDTetMesh>(g_InteractState.meshURL);
+            // m_sim = std::make_shared<QNPDSimulator>(tetMesh);
+        }
     }
 
     ~PDViewer()
@@ -52,7 +66,8 @@ public:
     // Config gravity and floor
     void Setup();
     void Reset();
-
+    
+public:
     void init(igl::opengl::glfw::Viewer* _viewer) override
     {
         viewer = _viewer;
@@ -62,12 +77,13 @@ public:
 
         m_frameBuffer = std::make_unique<OpenGLFrameBuffer>();
         {
-            glfwGetWindowSize(viewer->window, &m_sceneWindowSize.first, &m_sceneWindowSize.second);
-            spdlog::info(">>> Window m_sceneWindowSize = ({}, {})", m_sceneWindowSize.first, m_sceneWindowSize.second);
-            m_frameBuffer->create_buffers(m_sceneWindowSize.first, m_sceneWindowSize.second);
+            // glfwGetWindowSize(viewer->window, &m_sceneWindowSize.first, &m_sceneWindowSize.second);
+            // spdlog::info(">>> Window m_sceneWindowSize = ({}, {})", m_sceneWindowSize.first, m_sceneWindowSize.second);
+            // viewer->core().viewport = { 0, 0, m_sceneWindowSize.first * 1.0f, m_sceneWindowSize.second * 1.0f };
+            // spdlog::info(">>> viewer->core().viewport = ({}, {}, {}, {})", viewer->core().viewport(0), viewer->core().viewport(1), viewer->core().viewport(2), viewer->core().viewport(3));
+            // m_frameBuffer->create_buffers(m_sceneWindowSize.first, m_sceneWindowSize.second);
         }
     }
-
     void shutdown() override
     {
         m_imguiContext->end();

@@ -7,7 +7,7 @@ namespace PD {
 
 void OpenGLFrameBuffer::create_buffers(int width, int height)
 {
-    // spdlog::info(">>> OpenGLFrameBuffer::create_buffers - before");
+    spdlog::info(">>> OpenGLFrameBuffer::create_buffers - before");
     mWidth = width;
     mHeight = height;
 
@@ -45,15 +45,17 @@ void OpenGLFrameBuffer::create_buffers(int width, int height)
 
     unbind();
 
-    // spdlog::info(">>> OpenGLFrameBuffer::create_buffers - ok");
+    spdlog::info(">>> OpenGLFrameBuffer::create_buffers - ok");
 }
 
 void OpenGLFrameBuffer::delete_buffers()
 {
     if (mFBO) {
-        glDeleteFramebuffers(GL_FRAMEBUFFER, &mFBO);
+        spdlog::info(">>> OpenGLFrameBuffer::delete_buffers() - mFBO = {}, mTexId = {}, mDepthId = {}", mFBO, mTexId, mDepthId);
+        glDeleteFramebuffers(1, &mFBO);
         glDeleteTextures(1, &mTexId);
         glDeleteTextures(1, &mDepthId);
+        mFBO = 0;
         mTexId = 0;
         mDepthId = 0;
     }

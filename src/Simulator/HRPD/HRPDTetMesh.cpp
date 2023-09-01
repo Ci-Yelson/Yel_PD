@@ -322,29 +322,10 @@ PDScalar HRPDTetMesh::GetStvkEnergy(PDPositions& positions, int tInd)
 
 void HRPDTetMesh::IGL_SetMesh(igl::opengl::glfw::Viewer* viewer)
 {
-    spdlog::info(">>> HRPDTetMesh::IGL_SetMesh()");
-#ifdef PD_USE_CUDA
-    if (m_meshID == -1) {
-        m_meshID = viewer->append_mesh(true);
-        viewer->data(m_meshID).clear();
-        viewer->data(m_meshID).point_size = 1.0f;
-        viewer->data(m_meshID).set_mesh(m_positions.cast<double>(), m_triangles);
-        auto& _data = viewer->data(m_meshID);
-        _data.updateGL(_data, _data.invert_normals, _data.meshgl);
-        _data.meshgl.bind_mesh();
-        spdlog::info(">>> HRPDTetMesh::IGL_SetMesh() - meshgl.V_vbo = {}", viewer->data(m_meshID).meshgl.vbo_V);
-    }
-    viewer->data(m_meshID).dirty = 0;
-#else
-    if (m_meshID == -1) {
-        m_meshID = viewer->append_mesh(true);
-        viewer->data(m_meshID).clear();
-        viewer->data(m_meshID).point_size = 1.0f;
-    }
-    viewer->data(m_meshID).set_mesh(m_positions.cast<double>(), m_triangles);
-
-    { // Compute color
-        m_colors.resize(m_positions.rows(), m_positions.cols());
+    // spdlog::info(">>> HRPDTetMesh::IGL_SetMesh()");
+    // ==================== Compute color ====================
+    { 
+        m_colors.resize(m_positions.rows(), 1);
         // [todo]
         Eigen::MatrixXd disp_norms = (m_positions - m_restpose_positions).cast<double>().rowwise().norm();
         // spdlog::info(">>> DISP_NORMS - MIN = {}, MAX = {}", disp_norms.minCoeff(), disp_norms.maxCoeff());
@@ -352,19 +333,117 @@ void HRPDTetMesh::IGL_SetMesh(igl::opengl::glfw::Viewer* viewer)
         // spdlog::info(">>> DISP_NORMS - MIN = {}, MAX = {}", disp_norms.minCoeff(), disp_norms.maxCoeff());
         disp_norms /= disp_norms.maxCoeff();
         igl::jet(disp_norms, false, m_colors);
+        // spdlog::info(">>> M_COLORS Size = ({}, {})", m_colors.rows(), m_colors.cols());
         // spdlog::info(">>> M_COLORS - MAX = {}", m_colors.maxCoeff());
     }
-    viewer->data(m_meshID).set_colors(m_colors.cast<double>());
 
-    if (g_InteractState.draggingState.isDragging && (viewer->core().is_animating || g_InteractState.isSingleStep)) {
-        auto vert = g_InteractState.draggingState.vertex;
-        // spdlog::info("Pre draw - g_InteractState.draggingState points: {0} {1} {2}", pos.row(vert).x(), pos.row(vert).y(), pos.row(vert).z());
-        viewer->data(m_meshID).point_size = 20.f;
-        auto C = Eigen::RowVector3d(0, 1, 0);
-        viewer->data(m_meshID).set_points(m_positions.cast<double>().row(vert), C);
+    // ==================== Set mesh data ====================
+#ifdef PD_USE_CUDA
+    if (m_meshID == -1) {
+        m_meshID = viewer->append_mesh(true);
+        viewer->data(m_meshID).clear();
+        viewer->data(m_meshID).point_size = 1.0f;
+        viewer->data(m_meshID).set_mesh(m_positions.cast<double>(), m_triangles);
+        viewer->data(m_meshID).set_colors(m_colors.cast<double>());
+
+        spdlog::info(">>> HRPDTetMesh::IGL_SetMesh() - data.face_based = {}", viewer->data(m_meshID).face_based);
+
+        auto& _data = viewer->data(m_meshID);
+        _data.updateGL(_data, _data.invert_normals, _data.meshgl);
+        _data.dirty = 0;
+        _data.meshgl.bind_mesh();
+
+        spdlog::info(">>> HRPDTetMesh::IGL_SetMesh() - F.rows() = {}, m_colors.rows() = {}", viewer->data(m_meshID).F.rows(), m_colors.rows());
+
+        spdlog::info(">>> HRPDTetMesh::IGL_SetMesh() - meshgl.vbo_V = {}", viewer->data(m_meshID).meshgl.vbo_V);
+        spdlog::info(">>> HRPDTetMesh::IGL_SetMesh() - meshgl.vbo_V_uv = {}", viewer->data(m_meshID).meshgl.vbo_V_uv);
+        spdlog::info(">>> HRPDTetMesh::IGL_SetMesh() - meshgl.vbo_V_normals = {}", viewer->data(m_meshID).meshgl.vbo_V_normals);
+        spdlog::info(">>> HRPDTetMesh::IGL_SetMesh() - meshgl.vbo_V_ambient = {}", viewer->data(m_meshID).meshgl.vbo_V_ambient);
+        spdlog::info(">>> HRPDTetMesh::IGL_SetMesh() - meshgl.vbo_V_diffuse = {}", viewer->data(m_meshID).meshgl.vbo_V_diffuse);
+        spdlog::info(">>> HRPDTetMesh::IGL_SetMesh() - meshgl.vbo_V_specular = {}", viewer->data(m_meshID).meshgl.vbo_V_specular);
+        
+        if (m_GPUBufferMapper_V) delete m_GPUBufferMapper_V;
+        m_GPUBufferMapper_V = new CUDABufferMapping();
+        m_GPUBufferMapper_V->initBufferMap(m_positions.size() * sizeof(float), viewer->data(m_meshID).meshgl.vbo_V);
+
+        /*if (viewer->data(m_meshID).meshgl.V_uv_vbo.size() > 0) {
+            if (m_GPUBufferMapper_V_uv) delete m_GPUBufferMapper_V_uv;
+            m_GPUBufferMapper_V_uv = new CUDABufferMapping();
+            m_GPUBufferMapper_V_uv->initBufferMap(viewer->data(m_meshID).meshgl.V_uv_vbo.size() * sizeof(float), viewer->data(m_meshID).meshgl.vbo_V_uv);
+        }*/
+
+        /*if (m_GPUBufferMapper_V_normals) delete m_GPUBufferMapper_V_normals;
+        m_GPUBufferMapper_V_normals = new CUDABufferMapping();
+        m_GPUBufferMapper_V_normals->initBufferMap(viewer->data(m_meshID).meshgl.V_normals_vbo.size() * sizeof(float), viewer->data(m_meshID).meshgl.vbo_V_normals);*/
+
+        auto& data = viewer->data(m_meshID);
+        auto& meshgl = viewer->data(m_meshID).meshgl;
+
+        if (m_GPUBufferMapper_V_ambient_vbo) delete m_GPUBufferMapper_V_ambient_vbo;
+        m_GPUBufferMapper_V_ambient_vbo = new CUDABufferMapping();
+        m_GPUBufferMapper_V_ambient_vbo->initBufferMap(meshgl.V_ambient_vbo.size() * sizeof(float), viewer->data(m_meshID).meshgl.vbo_V_ambient);
+
+        if (m_GPUBufferMapper_V_diffuse_vbo) delete m_GPUBufferMapper_V_diffuse_vbo;
+        m_GPUBufferMapper_V_diffuse_vbo = new CUDABufferMapping();
+        m_GPUBufferMapper_V_diffuse_vbo->initBufferMap(meshgl.V_diffuse_vbo.size() * sizeof(float), viewer->data(m_meshID).meshgl.vbo_V_diffuse);
+
+        if (m_GPUBufferMapper_V_specular_vbo) delete m_GPUBufferMapper_V_specular_vbo;
+        m_GPUBufferMapper_V_specular_vbo = new CUDABufferMapping();
+        m_GPUBufferMapper_V_specular_vbo->initBufferMap(meshgl.V_specular_vbo.size() * sizeof(float), viewer->data(m_meshID).meshgl.vbo_V_specular);
+        
+        g_InteractState.isBufferMapping = true;
     }
+    if (g_InteractState.isBufferMapping) {
+        auto& data = viewer->data(m_meshID);
+        auto& meshgl = viewer->data(m_meshID).meshgl;
+        // Input:
+        //   X  #V by dim quantity
+        // Output:
+        //   X_vbo  #F*3 by dim scattering per corner
+        const auto per_corner = [&](
+                                    const Eigen::MatrixXd& X,
+                                    igl::opengl::MeshGL::RowMatrixXf& X_vbo) {
+            X_vbo.resize(data.F.rows() * 3, X.cols());
+            for (unsigned i = 0; i < data.F.rows(); ++i)
+                for (unsigned j = 0; j < 3; ++j)
+                    X_vbo.row(i * 3 + j) = X.row(data.F(i, j)).cast<float>();
+        };
+
+        viewer->data(m_meshID).set_mesh(m_positions.cast<double>(), m_triangles);
+        //viewer->data(m_meshID).dirty = 0;
+        viewer->data(m_meshID).set_colors(m_colors.cast<double>());
+        meshgl.V_vbo = data.V.cast<float>();
+        //Eigen::Matrix<float, -1, 3, Eigen::RowMajor> V_uv_vbo = viewer->data(m_meshID).V_uv.cast<float>();
+        //Eigen::Matrix<float, -1, 3, Eigen::RowMajor> V_normals_vbo = viewer->data(m_meshID).V_normals.cast<float>();
+        //per_corner(data.V_material_ambient, meshgl.V_ambient_vbo);
+        //per_corner(data.V_material_diffuse, meshgl.V_diffuse_vbo);
+        //per_corner(data.V_material_specular, meshgl.V_specular_vbo);
+
+        m_GPUBufferMapper_V->bufferMap(meshgl.V_vbo.data(), meshgl.V_vbo.size());
+        //m_GPUBufferMapper_V_uv->bufferMap(V_uv_vbo.data(), V_uv_vbo.size());
+        //m_GPUBufferMapper_V_normals->bufferMap(V_normals_vbo.data(), V_normals_vbo.size());
+        //m_GPUBufferMapper_V_ambient_vbo->bufferMap(meshgl.V_ambient_vbo.data(), meshgl.V_ambient_vbo.size());
+        //m_GPUBufferMapper_V_diffuse_vbo->bufferMap(meshgl.V_diffuse_vbo.data(), meshgl.V_diffuse_vbo.size());
+        //m_GPUBufferMapper_V_specular_vbo->bufferMap(meshgl.V_specular_vbo.data(), meshgl.V_specular_vbo.size());
+        //viewer->data(m_meshID).dirty = igl::opengl::MeshGL::DIRTY_TEXTURE;
+        //viewer->data(m_meshID).dirty = igl::opengl::MeshGL::DIRTY_TEXTURE;
+        viewer->data(m_meshID).dirty = igl::opengl::MeshGL::DIRTY_DIFFUSE | igl::opengl::MeshGL::DIRTY_SPECULAR | igl::opengl::MeshGL::DIRTY_AMBIENT;
+        //viewer->data(m_meshID).dirty = 0;
+    }
+    else {
+        viewer->data(m_meshID).set_mesh(m_positions.cast<double>(), m_triangles);
+        viewer->data(m_meshID).set_colors(m_colors.cast<double>());
+    }
+#else
+    if (m_meshID == -1) {
+        m_meshID = viewer->append_mesh(true);
+        viewer->data(m_meshID).clear(); // clear is expensive for large models ?
+        viewer->data(m_meshID).point_size = 1.0f;
+    }
+    viewer->data(m_meshID).set_mesh(m_positions.cast<double>(), m_triangles);
+    viewer->data(m_meshID).set_colors(m_colors.cast<double>());
 #endif
-    spdlog::info(">>> HRPDTetMesh::IGL_SetMesh() - After");
+    // spdlog::info(">>> HRPDTetMesh::IGL_SetMesh() - After");
 }
 
 } // namespace PD

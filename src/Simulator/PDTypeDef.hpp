@@ -3,12 +3,17 @@
 #include <Eigen/Dense>
 #include <Eigen/Sparse>
 
-#define PD_NUM_THREADS 8
-#define PD_EIGEN_NUM_THREADS 8
+#define PD_OMP_NUM_THREADS 6
+#define PD_EIGEN_NUM_THREADS 2
+
+#ifndef EIGEN_DONT_PARALLELIZE
+Eigen::setNbThreads(PD_EIGEN_NUM_THREADS);
+Eigen::initParallel();
+#endif
 
 #define DO_PRAGMA_(x) _Pragma(#x)
 #define DO_PRAGMA(x) DO_PRAGMA_(x)
-#define PD_PARALLEL_FOR DO_PRAGMA(omp parallel for num_threads(PD_NUM_THREADS))
+#define PD_PARALLEL_FOR DO_PRAGMA(omp parallel for num_threads(PD_OMP_NUM_THREADS))
 #define PD_PARALLEL_ATOMIC DO_PRAGMA(omp atomic)
 
 #define PD_CUTOFF (1e-10)

@@ -32,6 +32,8 @@ struct InteractState {
 
     std::string simulatorType = "HRPD";
 
+    bool isBufferMapping = false;
+
     // For HRPD
     struct HRPDParams {
         int numberSamplesForVertexPosSubspace = 150; // [k]

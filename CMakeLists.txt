@@ -24,6 +24,12 @@ if (PD_USE_CUDA)
     set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 endif()
 
+if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /openmp:llvm")
+elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fopenmp")
+endif()
+
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -w")
 add_compile_definitions(EIGEN_DONT_PARALLELIZE)
 
@@ -56,11 +62,6 @@ target_sources(${PROJECT_NAME} PUBLIC
 )
 # OpenMP
 find_package(OpenMP REQUIRED)
-if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /openmp:llvm")
-elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fopenmp")
-endif()
 target_link_libraries(${PROJECT_NAME} PUBLIC OpenMP::OpenMP_CXX)
 # spdlog
 find_package(spdlog REQUIRED)
@@ -71,12 +72,17 @@ target_link_libraries(${PROJECT_NAME} PUBLIC nlohmann_json::nlohmann_json)
 
 # CUDA
 if (PD_USE_CUDA)
-    target_compile_definitions(${PROJECT_NAME} PUBLIC PD_USE_CUDA)
     find_package(CUDAToolkit REQUIRED)
     
     # file(GLOB_RECURSE SRC_FILES CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/src/*.cu)
     # target_sources(${PROJECT_NAME} PUBLIC ${SRC_FILES})
-    set(CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES /usr/local/cuda-12.2/include)
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+        set(CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES "E:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.2\\include")
+    elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
+        set(CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES "/usr/local/cuda-12.2/include")
+    endif()
     target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
     target_link_libraries(${PROJECT_NAME} PUBLIC CUDA::cudart CUDA::cublas CUDA::cusparse)
+    
+    target_compile_definitions(${PROJECT_NAME} PUBLIC PD_USE_CUDA)
 endif()

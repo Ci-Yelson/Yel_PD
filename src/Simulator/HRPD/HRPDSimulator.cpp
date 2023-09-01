@@ -40,7 +40,9 @@ void HRPDSimulator::LoadParamsAndApply()
     m_dt2 = m_dt * m_dt;
     m_dt2inv = 1.0 / m_dt2;
 
+    TICKC(HRPD_PRECOMPUTE__TOTAL);
     PreCompute();
+    TOCKC(HRPD_PRECOMPUTE__TOTAL);
 }
 
 void HRPDSimulator::PreCompute()
@@ -255,6 +257,7 @@ void HRPDSimulator::Reset()
 
 void HRPDSimulator::ComputeWeightedExtForces()
 {
+    PROFILE_PREC("ComputeWeightedExtForces");
     // When change f_{ext}, need to call this.
     spdlog::info(">>> HRPD-SubspaceBuilder::ComputeWeightedExtForces");
     int _N = m_mesh->m_positions.rows();

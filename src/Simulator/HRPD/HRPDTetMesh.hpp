@@ -13,6 +13,10 @@
 #include "STVDSampler.hpp"
 #include "igl/opengl/glfw/Viewer.h"
 
+#ifdef PD_USE_CUDA
+#include "Simulator/HRPD/CUDA/CUDAMatrixVectorMult.hpp"
+#endif
+
 #define BASE_FUNC_CUTOFF 0.0001
 // For skinning space radial-based weights
 #define USE_QUARTIC_POL true
@@ -44,6 +48,15 @@ struct HRPDTetMesh {
     std::vector<Eigen::Triplet<PDScalar>> m_selectionMatrixTris;
     std::vector<PDMatrix> m_restEdgesInv;
 
+#ifdef PD_USE_CUDA
+    CUDABufferMapping* m_GPUBufferMapper_V = nullptr;
+    CUDABufferMapping* m_GPUBufferMapper_V_uv = nullptr;
+    CUDABufferMapping* m_GPUBufferMapper_V_normals = nullptr;
+    CUDABufferMapping* m_GPUBufferMapper_V_ambient_vbo = nullptr;
+    CUDABufferMapping* m_GPUBufferMapper_V_diffuse_vbo = nullptr;
+    CUDABufferMapping* m_GPUBufferMapper_V_specular_vbo = nullptr;
+#endif
+
 public:
     HRPDTetMesh(std::string meshURL);
     
@@ -63,6 +76,12 @@ public:
     {
         m_velocities.setZero();
         m_positions = m_restpose_positions;
+#ifdef PD_USE_CUDA
+        for (int d = 0; d < 3; d++) {
+            Eigen::Matrix<float, -1, 3, Eigen::RowMajor> V_vbo = m_positions.cast<float>();
+            m_GPUBufferMapper_V->bufferMap(V_vbo.data(), V_vbo.size());
+        }
+#endif
     }
     void UpdatePosAndVel(PDPositions& pos, PDPositions& vel)
     {
