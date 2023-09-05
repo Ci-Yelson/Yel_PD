@@ -5,6 +5,7 @@
 
 namespace PD {
 struct PDSimulator {
+public:
     virtual void LoadParamsAndApply() = 0;
     virtual void UpdateTimeStep() = 0;
 

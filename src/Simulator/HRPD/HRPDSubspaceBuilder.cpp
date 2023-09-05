@@ -7,6 +7,8 @@
 #include "Viewer/PDViewer.hpp"
 #include "spdlog/spdlog.h"
 
+#include "Simulator/HRPD/CUDA/CUDAMatrixOP.hpp"
+
 extern UI::InteractState g_InteractState;
 extern Util::Profiler g_FrameProfiler;
 extern Util::Profiler g_StepProfiler;
@@ -371,6 +373,7 @@ void SubspaceBuilder::CreateProjectionInterpolationMatrix()
 {
     PROFILE_PREC("CreateProjectionInterpolationMatrix");
     // ### Extend vertex sample to constraint sample
+    TICK(EXTEND);
     int numConstraintSamples = g_InteractState.hrpdParams.numberSampledConstraints;
     m_constraintVertexSamples = m_posSamples;
     { // make sure m_constraintVertexSamples size = numConstraintSamples
@@ -413,10 +416,12 @@ void SubspaceBuilder::CreateProjectionInterpolationMatrix()
         }
     }
     std::sort(m_sampledConstraintInds.begin(), m_sampledConstraintInds.end());
-    // spdlog::info(">>> ConstraintTetSamples size = {}", m_sampledConstraintInds.size());
+    spdlog::info(">>> ConstraintTetSamples size = {}", m_sampledConstraintInds.size());
+    TOCK(EXTEND);
 
     // ### Set used vertices [?]
     {
+        TICK(SETUP_USEDSPACE);
         m_usedVertices.resize(m_sampledConstraintInds.size() * 4);
         PD_PARALLEL_FOR
         for (int subTetInd = 0; subTetInd < m_sampledConstraintInds.size(); subTetInd++) {
@@ -477,9 +482,23 @@ void SubspaceBuilder::CreateProjectionInterpolationMatrix()
                 m_usedSubspaceSolverSparse.compute(lhsMatSparse);
             }
         }
+        TOCK(SETUP_USEDSPACE);
+    }
+
+    {
+#ifdef PD_USE_CUDA
+        spdlog::info(">>> GPU Updater Init - Before");
+        if (m_vPosGPUUpdater != nullptr) delete m_vPosGPUUpdater;
+        m_vPosGPUUpdater = new CUDASparseMatrixVectorMultiplier(m_U_sp);
+        if (m_vsPosGPUUpdater) delete m_vsPosGPUUpdater;
+        m_vsPosGPUUpdater = new CUDASparseMatrixVectorMultiplier(m_U_used_sp);
+
+        spdlog::info(">>> GPU Updater Init - After");
+#endif
     }
 
     // ### Create selection J matrix
+    TICK(SELECTION_J);
     // 3 * kt
     std::vector<PDSparseMatrixTriplet> selectedInds(m_sampledConstraintInds.size() * 3);
     for (size_t i = 0; i < m_sampledConstraintInds.size(); i++) {
@@ -496,13 +515,18 @@ void SubspaceBuilder::CreateProjectionInterpolationMatrix()
         m_V.conservativeResize(m_V.rows(), m_J.rows() - MIN_OVERSAMPLING);
     }
     m_J.makeCompressed();
-    spdlog::info("      Selection matrix J - done.");
+    TOCK(SELECTION_J);
+    spdlog::info(">>> Selection matrix J - done.");
 }
 
 void SubspaceBuilder::InitProjection()
 {
     PROFILE_PREC("InitProjection");
+#ifdef PD_USE_CUDA
+    CUDAMatrixUTMU(m_U, m_massMatrixForPos, m_UTMU);
+#else
     m_UTMU = m_UT * m_massMatrixForPos * m_U;
+#endif
     PDSparseMatrix UTMU_Sparse = m_UTMU.sparseView(0, PD_SPARSITY_CUTOFF);
     m_subspaceSolverSparse.compute(UTMU_Sparse);
     if (m_subspaceSolverSparse.info() != Eigen::Success) {
@@ -514,47 +538,72 @@ void SubspaceBuilder::InitInterpolation()
 {
     PROFILE_PREC("InitInterpolation");
     ms_VTJT = m_V.transpose() * m_J.transpose();
-    PDMatrix _VTJTJV = m_V.transpose() * (m_J.transpose() * m_J) * m_V;
+    PDMatrix _VTJTJV = ms_VTJT * (m_J * m_V);
     m_fittingSolver.compute(_VTJTJV);
     // 4) compute finalize matrix
     // Finalize Matrix = [4k x (ks + 1)] -> UT @ ST (@ WI) @ V
     {
+        TICKC(INTERPOLATION_FINALIZE);
+        TICK(SPARSE_PART_TIMECOST);
         // UT @ ST -> [4k x 3e] = [4k x N] @ [N x 3e]
         PDSparseMatrix UTST_WI = m_UT_sp * m_ST;
         PD_PARALLEL_FOR
         for (int c = 0; c < UTST_WI.cols(); c++) {
             UTST_WI.col(c) *= m_weightMatrixDiagForProj(c);
         }
+        TOCK(SPARSE_PART_TIMECOST);
+        TICK(DENSE_PART_TIMECOST);
         // Finalize Matrix = [4k x (ks + 1)] -> UT @ ST (@ WI) @ V
-        ms_UTSTWiV = UTST_WI * m_V;
         ms_UTSTWiV.resize(m_UT_sp.rows(), m_V.cols());
+#ifdef PD_USE_CUDA //[TODO]
+        CUDASparseMatrixVectorMultiplier* cudaMulti = new CUDASparseMatrixVectorMultiplier(UTST_WI);
+        for (int c = 0; c < m_V.cols(); c++) {
+            // [4k x 1] = [4k x 3e] [3e x 1]
+            // ms_UTSTWiV.col(c) = UTST_WI * m_V.col(c);
+            cudaMulti->mult(m_V.data() + (c * m_V.rows()), ms_UTSTWiV.data() + (c * ms_UTSTWiV.rows()));
+        }
+        delete cudaMulti;
+        // { // Check
+        //     PD_PARALLEL_FOR
+        //     PDMatrix _db(ms_UTSTWiV.rows(), ms_UTSTWiV.cols());
+        //     for (int c = 0; c < m_V.cols(); c++) {
+        //         // [4k x 1] = [4k x 3e] [3e x 1]
+        //         _db.col(c) = UTST_WI * m_V.col(c);
+        //     }
+        //     spdlog::critical(">>> SubspaceBuilder::InitInterpolation - Finalize Matrix Diff = {}", (_db - ms_UTSTWiV).rowwise().norm().sum());
+        //     // Util::storeData(ms_UTSTWiV, "debug/UTSTWiV_GPU", true);
+        //     // Util::storeData(_db, "debug/UTSTWiV_CPU", true);
+        // }
+#else
         PD_PARALLEL_FOR
         for (int c = 0; c < m_V.cols(); c++) {
             // [4k x 1] = [4k x 3e] [3e x 1]
             ms_UTSTWiV.col(c) = UTST_WI * m_V.col(c);
         }
+#endif
+        TOCK(DENSE_PART_TIMECOST);
+        TOCKC(INTERPOLATION_FINALIZE);
     }
 }
 
 void SubspaceBuilder::ProjectFullspaceToSubspaceForPos(PDPositions& sub, PDPositions& full)
 {
     // Solve UTMU * x_{sub} = UTM * x_{full}
-    PDMatrix rhs = m_UT * m_massMatrixForPos * full;
+    PDSparseMatrix _UTM = m_UT_sp * m_massMatrixForPos;
     sub.resize(m_UT.rows(), 3);
     PD_PARALLEL_FOR
     for (int d = 0; d < 3; d++) {
-        sub.col(d) = m_subspaceSolverSparse.solve(rhs.col(d));
+        sub.col(d) = m_subspaceSolverSparse.solve(_UTM * full.col(d));
     }
 }
 
 void SubspaceBuilder::ProjectUsedFullspaceToSubspaceForPos(PDPositions& sub, PDPositions& usedfull)
 {
     // Solve (UT_{used} * U_{used}) * x_{sub} = (UT_{used}) * x_{used}
-    PDMatrix rhs = m_UT_used * usedfull;
-    sub.resize(m_UT_used.rows(), 3);
+    sub.resize(m_UT_used_sp.rows(), 3);
     PD_PARALLEL_FOR
     for (int d = 0; d < 3; d++) {
-        sub.col(d) = m_usedSubspaceSolverSparse.solve(rhs.col(d));
+        sub.col(d) = m_usedSubspaceSolverSparse.solve(m_UT_used_sp * usedfull.col(d));
     }
 }
 
@@ -562,47 +611,24 @@ void SubspaceBuilder::InterpolateSubspaceToFullspaceForPos(PDPositions& posFull,
 {
     // x_{full} = U * x_{sub}
     if (usedVerticesOnly) {
-#ifdef PD_USE_CUDA
-        // {
-        //     PROFILE_STEP("INTERPOLATION_USED");
-        //     PDScalar one = 1;
-        //     for (int d = 0; d < 3; d++) {
-        //         // m_usedVertexUpdaterSparse->mult(posSub.data() + (d * posSub.rows()), posFull.data() + (d * posFull.rows()), one);
-        //         /* Sparse multiplication does NOT seem worth it in this case */
-        //         m_usedVertexUpdate->mult(posSub.data() + (d * posSub.rows()), posFull.data() + (d * posFull.rows()), one);
-        //     }
-        // }
-        // { // DEBUG
-        //     PROFILE_STEP("INTERPOLATION_USED_DB");
-        //     PDPositions db_posFull = posFull;
-        //     PD_PARALLEL_FOR
-        //     for (int d = 0; d < 3; d++) {
-        //         db_posFull.col(d) = m_U_used_sp * posSub.col(d);
-        //     }
-        //     spdlog::critical(">>> SubspaceBuilder::InterpolateSubspaceToFullspaceForPos() - Used POS Diff = {}", (db_posFull - posFull).rowwise().norm().sum());
-        // }
-        PD_PARALLEL_FOR
-        for (int d = 0; d < 3; d++) {
-            posFull.col(d) = m_U_used_sp * posSub.col(d);
+        {   // GPU updater is slower than CPU - Matrix size not big enough
+            PROFILE_STEP("INTERPOLATION_USED");
+            PD_PARALLEL_FOR
+            for (int d = 0; d < 3; d++) {
+                posFull.col(d) = m_U_used_sp * posSub.col(d);
+            }
         }
-#else
-        PD_PARALLEL_FOR
-        for (int d = 0; d < 3; d++) {
-            posFull.col(d) = m_U_used_sp * posSub.col(d);
-        }
-#endif
     }
     else {
 #ifdef PD_USE_CUDA
-        // {
-        //     PROFILE_STEP("INTERPOLATION_FULL");
-        //     PDScalar one = 1;
-        //     for (int d = 0; d < 3; d++) {
-        //         // m_vPosGPUUpdate->mult(posSub.data() + (d * posSub.rows()), nullptr, one, false, d, int(m_mesh->m_positions.rows()));
-        //         //m_vPosGPUUpdate->mult(posSub.data() + (d * posSub.rows()), posFull.data() + (d * posFull.rows()), one, false, d, int(m_mesh->m_positions.rows()));
-        //         m_vPosGPUUpdate->mult(posSub.data() + (d * posSub.rows()), posFull.data() + (d * posFull.rows()), d, int(m_mesh->m_positions.rows()));
-        //     }
-        // }
+        { // Sparse Matrix GPU Implementation - Faster
+            PROFILE_STEP("INTERPOLATION_FULL");
+            PDScalar one = 1;
+            for (int d = 0; d < 3; d++) {
+                // m_vPosGPUUpdater->mult(posSub.data() + (d * posSub.rows()), nullptr, one, false, d, int(m_mesh->m_positions.rows()));
+                m_vPosGPUUpdater->mult(posSub.data() + (d * posSub.rows()), posFull.data() + (d * posFull.rows()), d, int(m_mesh->m_positions.rows()));
+            }
+        }
         // { // DEBUG
         //     PROFILE_STEP("INTERPOLATION_FULL_DB");
         //     PDPositions db_posFull = posFull;
@@ -612,14 +638,20 @@ void SubspaceBuilder::InterpolateSubspaceToFullspaceForPos(PDPositions& posFull,
         //     }
         //     spdlog::critical(">>> SubspaceBuilder::InterpolateSubspaceToFullspaceForPos() - Full POS Diff = {}", (db_posFull - posFull).rowwise().norm().sum());
         // }
-        PD_PARALLEL_FOR
-        for (int d = 0; d < 3; d++) {
-            posFull.col(d) = m_U_sp * posSub.col(d);
-        }
+        // {
+        //     PROFILE_STEP("INTERPOLATION_FULL");
+        //     PD_PARALLEL_FOR
+        //     for (int d = 0; d < 3; d++) {
+        //         posFull.col(d) = m_U_sp * posSub.col(d);
+        //     }
+        // }
 #else
-        PD_PARALLEL_FOR
-        for (int d = 0; d < 3; d++) {
-            posFull.col(d) = m_U_sp * posSub.col(d);
+        {
+            PROFILE_STEP("INTERPOLATION_FULL");
+            PD_PARALLEL_FOR
+            for (int d = 0; d < 3; d++) {
+                posFull.col(d) = m_U_sp * posSub.col(d);
+            }
         }
 #endif
     }
@@ -645,5 +677,4 @@ void SubspaceBuilder::GetUsedP()
     //     m_projectionsUsedVs.block(tInd * 3, 0, 3, 3) = m_mesh->GetP(m_sampledConstraintInds[tInd]);
     // }
 }
-
 }

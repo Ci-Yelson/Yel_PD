@@ -369,39 +369,40 @@ void HRPDTetMesh::IGL_SetMesh(igl::opengl::glfw::Viewer* viewer)
 #ifdef PD_USE_CUDA
     if (m_meshID == -1) {
         m_meshID = viewer->append_mesh(true);
-        viewer->data(m_meshID).clear();
-        viewer->data(m_meshID).point_size = 1.0f;
-        viewer->data(m_meshID).set_mesh(m_positions.cast<double>(), m_triangles);
-        viewer->data(m_meshID).set_colors(m_colors.cast<double>());
+        auto& meshData = viewer->data(viewer->mesh_index(m_meshID));
+        meshData.clear();
+        meshData.point_size = 1.0f;
+        meshData.set_mesh(m_positions.cast<double>(), m_triangles);
+        meshData.set_colors(m_colors.cast<double>());
 
-        spdlog::info(">>> HRPDTetMesh::IGL_SetMesh() - data.face_based = {}", viewer->data(m_meshID).face_based);
+        spdlog::info(">>> HRPDTetMesh::IGL_SetMesh() - data.face_based = {}", meshData.face_based);
 
-        auto& _data = viewer->data(m_meshID);
+        auto& _data = meshData;
         _data.updateGL(_data, _data.invert_normals, _data.meshgl);
         _data.dirty = 0;
         _data.meshgl.bind_mesh();
 
-        spdlog::info(">>> HRPDTetMesh::IGL_SetMesh() - F.rows() = {}, m_colors.rows() = {}", viewer->data(m_meshID).F.rows(), m_colors.rows());
+        spdlog::info(">>> HRPDTetMesh::IGL_SetMesh() - F.rows() = {}, m_colors.rows() = {}", meshData.F.rows(), m_colors.rows());
 
-        spdlog::info(">>> HRPDTetMesh::IGL_SetMesh() - meshgl.vbo_V = {}", viewer->data(m_meshID).meshgl.vbo_V);
-        spdlog::info(">>> HRPDTetMesh::IGL_SetMesh() - meshgl.vbo_V_uv = {}", viewer->data(m_meshID).meshgl.vbo_V_uv);
-        spdlog::info(">>> HRPDTetMesh::IGL_SetMesh() - meshgl.vbo_V_normals = {}", viewer->data(m_meshID).meshgl.vbo_V_normals);
-        spdlog::info(">>> HRPDTetMesh::IGL_SetMesh() - meshgl.vbo_V_ambient = {}", viewer->data(m_meshID).meshgl.vbo_V_ambient);
-        spdlog::info(">>> HRPDTetMesh::IGL_SetMesh() - meshgl.vbo_V_diffuse = {}", viewer->data(m_meshID).meshgl.vbo_V_diffuse);
-        spdlog::info(">>> HRPDTetMesh::IGL_SetMesh() - meshgl.vbo_V_specular = {}", viewer->data(m_meshID).meshgl.vbo_V_specular);
+        spdlog::info(">>> HRPDTetMesh::IGL_SetMesh() - meshgl.vbo_V = {}", meshData.meshgl.vbo_V);
+        spdlog::info(">>> HRPDTetMesh::IGL_SetMesh() - meshgl.vbo_V_uv = {}", meshData.meshgl.vbo_V_uv);
+        spdlog::info(">>> HRPDTetMesh::IGL_SetMesh() - meshgl.vbo_V_normals = {}", meshData.meshgl.vbo_V_normals);
+        spdlog::info(">>> HRPDTetMesh::IGL_SetMesh() - meshgl.vbo_V_ambient = {}", meshData.meshgl.vbo_V_ambient);
+        spdlog::info(">>> HRPDTetMesh::IGL_SetMesh() - meshgl.vbo_V_diffuse = {}", meshData.meshgl.vbo_V_diffuse);
+        spdlog::info(">>> HRPDTetMesh::IGL_SetMesh() - meshgl.vbo_V_specular = {}", meshData.meshgl.vbo_V_specular);
 
         if (m_GPUBufferMapper_V) delete m_GPUBufferMapper_V;
         m_GPUBufferMapper_V = new CUDABufferMapping();
-        m_GPUBufferMapper_V->initBufferMap(m_positions.size() * sizeof(float), viewer->data(m_meshID).meshgl.vbo_V);
+        m_GPUBufferMapper_V->initBufferMap(m_positions.size() * sizeof(float), meshData.meshgl.vbo_V);
 
-        /*if (viewer->data(m_meshID).meshgl.V_uv_vbo.size() > 0) {
+        /*if (meshData.meshgl.V_uv_vbo.size() > 0) {
             if (m_GPUBufferMapper_V_uv) delete m_GPUBufferMapper_V_uv;
             m_GPUBufferMapper_V_uv = new CUDABufferMapping();
-            m_GPUBufferMapper_V_uv->initBufferMap(viewer->data(m_meshID).meshgl.V_uv_vbo.size() * sizeof(float), viewer->data(m_meshID).meshgl.vbo_V_uv);
+            m_GPUBufferMapper_V_uv->initBufferMap(meshData.meshgl.V_uv_vbo.size() * sizeof(float), meshData.meshgl.vbo_V_uv);
         }*/
 
-        auto& data = viewer->data(m_meshID);
-        auto& meshgl = viewer->data(m_meshID).meshgl;
+        auto& data = meshData;
+        auto& meshgl = meshData.meshgl;
 
         if (m_GPUBufferMapper_V_normals) delete m_GPUBufferMapper_V_normals;
         m_GPUBufferMapper_V_normals = new CUDABufferMapping();
@@ -422,15 +423,15 @@ void HRPDTetMesh::IGL_SetMesh(igl::opengl::glfw::Viewer* viewer)
         g_InteractState.isBufferMapping = true;
     }
     if (g_InteractState.isBufferMapping) {
-        auto& data = viewer->data(m_meshID);
-        auto& meshgl = viewer->data(m_meshID).meshgl;
+        auto& data = viewer->data(viewer->mesh_index(m_meshID));
+        auto& meshgl = data.meshgl;
 
         { // Position update
-            viewer->data(m_meshID).set_mesh(m_positions.cast<double>(), m_triangles);
+            // data.set_mesh(m_positions.cast<double>(), m_triangles);
             meshgl.V_vbo = m_positions.cast<float>();
             m_GPUBufferMapper_V->bufferMap(meshgl.V_vbo.data(), meshgl.V_vbo.size());
-            meshgl.V_normals_vbo = data.V_normals.cast<float>();
-            m_GPUBufferMapper_V_normals->bufferMap(meshgl.V_normals_vbo.data(), meshgl.V_normals_vbo.size());
+            // meshgl.V_normals_vbo = data.V_normals.cast<float>();
+            // m_GPUBufferMapper_V_normals->bufferMap(meshgl.V_normals_vbo.data(), meshgl.V_normals_vbo.size());
         }
 
         {
@@ -439,7 +440,7 @@ void HRPDTetMesh::IGL_SetMesh(igl::opengl::glfw::Viewer* viewer)
         }
 
         { // Colors update
-            // viewer->data(m_meshID).set_colors(m_colors.cast<double>());
+            // meshData.set_colors(m_colors.cast<double>());
             // using MatrixXd = Eigen::MatrixXd;
             // // Ambient color should be darker color
             // const auto ambient = [](const MatrixXd& C) -> MatrixXd {
@@ -466,7 +467,7 @@ void HRPDTetMesh::IGL_SetMesh(igl::opengl::glfw::Viewer* viewer)
             // meshgl.V_diffuse_vbo = data.V_material_diffuse.cast<float>();
             // meshgl.V_specular_vbo = data.V_material_specular.cast<float>();
 
-            // [177K case] SET_COLORS: 0.0047059 s
+            // [177K case] SET_COLORS: 0.0047059 s - TODO: Use cuda kernel to update?
             // TICKC(SET_COLORS);
             PD_PARALLEL_FOR
             for (size_t i = 0; i < meshgl.V_diffuse_vbo.rows(); i++) {
@@ -483,21 +484,23 @@ void HRPDTetMesh::IGL_SetMesh(igl::opengl::glfw::Viewer* viewer)
             // TOCKC(SET_COLORS);
         }
 
-        //  viewer->data(m_meshID).dirty = igl::opengl::MeshGL::DIRTY_DIFFUSE | igl::opengl::MeshGL::DIRTY_SPECULAR | igl::opengl::MeshGL::DIRTY_AMBIENT;
-        viewer->data(m_meshID).dirty = 0;
+        //  data.dirty = igl::opengl::MeshGL::DIRTY_DIFFUSE | igl::opengl::MeshGL::DIRTY_SPECULAR | igl::opengl::MeshGL::DIRTY_AMBIENT;
+        data.dirty = 0;
     }
     else {
-        viewer->data(m_meshID).set_mesh(m_positions.cast<double>(), m_triangles);
-        viewer->data(m_meshID).set_colors(m_colors.cast<double>());
+        auto& data = viewer->data(viewer->mesh_index(m_meshID));
+        data.set_mesh(m_positions.cast<double>(), m_triangles);
+        data.set_colors(m_colors.cast<double>());
     }
 #else
     if (m_meshID == -1) {
         m_meshID = viewer->append_mesh(true);
-        viewer->data(m_meshID).clear(); // clear is expensive for large models ?
-        viewer->data(m_meshID).point_size = 1.0f;
+        viewer->data(viewer->mesh_index(m_meshID)).clear(); // clear is expensive for large models ?
+        viewer->data(viewer->mesh_index(m_meshID)).point_size = 1.0f;
     }
-    viewer->data(m_meshID).set_mesh(m_positions.cast<double>(), m_triangles);
-    viewer->data(m_meshID).set_colors(m_colors.cast<double>());
+    auto& meshData = viewer->data(viewer->mesh_index(m_meshID));
+    meshData.set_mesh(m_positions.cast<double>(), m_triangles);
+    meshData.set_colors(m_colors.cast<double>());
 #endif
     // spdlog::info(">>> HRPDTetMesh::IGL_SetMesh() - After");
 }

@@ -49,6 +49,7 @@ target_compile_definitions(${PROJECT_NAME} PUBLIC IGL_VIEWER_VIEWER_QUIET)
 # Add libs/ : imgui_docking, imguizmo
 target_include_directories(${PROJECT_NAME} PUBLIC ${PROJECT_SOURCE_DIR}/libs)
 target_include_directories(${PROJECT_NAME} PUBLIC ${PROJECT_SOURCE_DIR}/libs/imgui)
+target_include_directories(${PROJECT_NAME} PUBLIC ${PROJECT_SOURCE_DIR}/libs/imguizmo)
 target_sources(${PROJECT_NAME} PUBLIC 
     ${PROJECT_SOURCE_DIR}/libs/imgui/imgui.cpp
     ${PROJECT_SOURCE_DIR}/libs/imgui/imgui_draw.cpp

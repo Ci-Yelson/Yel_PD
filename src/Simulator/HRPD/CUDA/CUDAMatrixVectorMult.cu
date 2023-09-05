@@ -214,6 +214,7 @@ void CUDAMatrixVectorMultiplier::initBufferMap(GLuint bufferId)
 ///////////////////////////////////////////////////////////////////////////////////////////
 CUDASparseMatrixVectorMultiplier::CUDASparseMatrixVectorMultiplier(PD::PDSparseMatrix& mat)
 {
+    spdlog::info(">>> CUDASparseMatrixVectorMultiplier Init - Before");
     checkCudaErrors(cusparseCreate(&m_handle));
 
     checkCudaErrors(cusparseCreateMatDescr(&m_descr));
@@ -228,15 +229,34 @@ CUDASparseMatrixVectorMultiplier::CUDASparseMatrixVectorMultiplier(PD::PDSparseM
     m_num_nonzeros = M_csc.nonZeros();
 
     checkCudaErrors(cudaMalloc(&m_M_values, sizeof(PD::PDScalar) * m_num_nonzeros));
-    checkCudaErrors(cudaMalloc(&m_M_rowInd, sizeof(int) * (m_num_rows + 1)));
-    checkCudaErrors(cudaMalloc(&m_M_colPtr, sizeof(int) * m_num_nonzeros));
+    checkCudaErrors(cudaMalloc(&m_M_rowInd, sizeof(int) * m_num_nonzeros));
+    checkCudaErrors(cudaMalloc(&m_M_colPtr, sizeof(int) * (m_num_cols + 1)));
 
     checkCudaErrors(cudaMemcpy(m_M_values, M_csc.valuePtr(), sizeof(PD::PDScalar) * m_num_nonzeros, cudaMemcpyHostToDevice));
-    checkCudaErrors(cudaMemcpy(m_M_rowInd, M_csc.outerIndexPtr(), sizeof(int) * (m_num_rows + 1), cudaMemcpyHostToDevice));
-    checkCudaErrors(cudaMemcpy(m_M_colPtr, M_csc.innerIndexPtr(), sizeof(int) * m_num_nonzeros, cudaMemcpyHostToDevice));
+    checkCudaErrors(cudaMemcpy(m_M_rowInd, M_csc.innerIndexPtr(), sizeof(int) * m_num_nonzeros, cudaMemcpyHostToDevice));
+    checkCudaErrors(cudaMemcpy(m_M_colPtr, M_csc.outerIndexPtr(), sizeof(int) * (m_num_cols + 1), cudaMemcpyHostToDevice));
 
-    checkCudaErrors(cusparseCreateCsc(&m_mat, m_num_rows, m_num_cols, m_num_nonzeros,
-        m_M_rowInd, m_M_colPtr, m_M_values, CUSPARSE_INDEX_32I,
+    // Manually create the CSC data for the sparse matrix
+	// PD::PDScalar* entries = new PD::PDScalar[m_num_nonzeros];
+	// int* rowInds = new int[m_num_nonzeros];
+	// int* colPtr = new int[m_num_cols + 1];
+	// unsigned int counter = 0;
+	// colPtr[0] = 0;
+	// for (int k = 0; k < mat.outerSize(); ++k) {
+	// 	for (PD::PDSparseMatrix::InnerIterator it(mat, k); it; ++it)
+	// 	{
+	// 		entries[counter] = it.value();
+	// 		rowInds[counter] = it.row();
+	// 		counter++;
+	// 	}
+	// 	colPtr[k + 1] = counter;
+	// }
+    // checkCudaErrors(cudaMemcpy(m_M_values, entries, sizeof(PD::PDScalar) * m_num_nonzeros, cudaMemcpyHostToDevice));
+    // checkCudaErrors(cudaMemcpy(m_M_rowInd, rowInds, sizeof(int) * m_num_nonzeros, cudaMemcpyHostToDevice));
+    // checkCudaErrors(cudaMemcpy(m_M_colPtr, colPtr, sizeof(int) * (m_num_cols + 1), cudaMemcpyHostToDevice));
+
+    checkCudaErrors(cusparseCreateCsc(&m_mat, m_num_rows, m_num_cols, m_num_nonzeros, m_M_colPtr,
+        m_M_rowInd, m_M_values, CUSPARSE_INDEX_32I,
         CUSPARSE_INDEX_32I, CUSPARSE_INDEX_BASE_ZERO, CUDA_R_64F));
 
     checkCudaErrors(cudaMalloc(&m_V_in_dv, sizeof(PD::PDScalar) * m_num_cols));
@@ -249,10 +269,11 @@ CUDASparseMatrixVectorMultiplier::CUDASparseMatrixVectorMultiplier(PD::PDSparseM
     beta = 0.0;
 
     // Query buffer size
-    cusparseSpMV_bufferSize(m_handle, CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha, m_mat, m_vecIn, &beta, m_vecOut, CUDA_R_64F, CUSPARSE_SPMV_ALG_DEFAULT, &bufferSize);
-
+    checkCudaErrors(cusparseSpMV_bufferSize(m_handle, CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha, m_mat, m_vecIn, &beta, m_vecOut, CUDA_R_64F, CUSPARSE_SPMV_ALG_DEFAULT, &bufferSize));
     // Allocate buffer
-    cudaMalloc(&buffer, bufferSize);
+    checkCudaErrors(cudaMalloc(&buffer, bufferSize));
+
+    spdlog::info(">>> CUDASparseMatrixVectorMultiplier Init - After");
 }
 
 CUDASparseMatrixVectorMultiplier::~CUDASparseMatrixVectorMultiplier()
@@ -278,19 +299,6 @@ void CUDASparseMatrixVectorMultiplier::mult(void* inData, void* outData, int coo
     // checkCudaErrors(cusparseDnVecGetValues(m_vecOut, (void**) & m_V_out_dv));
     checkCudaErrors(cudaMemcpy(outData, m_V_out_dv, sizeof(PD::PDScalar) * m_num_rows, cudaMemcpyDeviceToHost));
 
-    if (bufferInitifalized) {
-        // Copy from outData to m_glArrayPtr while casting from PDScalar to float
-        int N = m_num_rows;
-        if (cutoff >= 0) {
-            N = cutoff;
-        }
-        checkCudaErrors(cudaGraphicsMapResources(1, &m_res, 0));
-        size_t size;
-        checkCudaErrors(cudaGraphicsResourceGetMappedPointer((void**)&m_glArrayPtr, &size, m_res));
-        doubleToFloatDeviceCpy(N, coord, static_cast<PD::PDScalar*>(m_V_out_dv), m_glArrayPtr);
-        checkCudaErrors(cudaDeviceSynchronize());
-        checkCudaErrors(cudaGraphicsUnmapResources(1, &m_res, 0));
-    }
     checkCudaErrors(cudaDeviceSynchronize());
 }
 

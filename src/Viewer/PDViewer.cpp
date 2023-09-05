@@ -8,6 +8,7 @@
 
 #include "igl/jet.h"
 #include "igl/unproject_onto_mesh.h"
+#include <igl/opengl/glfw/imgui/ImGuizmoWidget.h>
 
 #include "imgui/imgui.h"
 #include "imgui/imgui_internal.h"
@@ -17,6 +18,8 @@
 #include <cstddef>
 
 extern UI::InteractState g_InteractState;
+extern igl::opengl::glfw::Viewer g_Viewer;
+extern igl::opengl::glfw::imgui::ImGuizmoWidget g_Gizmo;
 
 namespace PD {
 
@@ -75,7 +78,7 @@ bool PDViewer::pre_draw()
     PROFILE("FRAME");
     m_frameTimer.startStopWatch();
     bool _DB = false;
-    if(_DB) spdlog::info(">>> PDViewer::Frame");
+    if (_DB) spdlog::info(">>> PDViewer::Frame");
 
     {
         PROFILE("PRE_DRAW");
@@ -111,7 +114,7 @@ bool PDViewer::pre_draw()
             }
         }
         m_predrawTimer.stopStopWatch();
-        if(_DB) spdlog::info(">>> PDViewer::Frame - After pre draw");
+        if (_DB) spdlog::info(">>> PDViewer::Frame - After pre draw");
     }
 
     { // viewer core draw mesh
@@ -124,8 +127,9 @@ bool PDViewer::pre_draw()
                 }
             }
         }
+        g_Gizmo.draw();
         m_drawTimer.stopStopWatch();
-        if(_DB) spdlog::info(">>> PDViewer::Frame - After draw");
+        if (_DB) spdlog::info(">>> PDViewer::Frame - After draw");
     }
 
     {
@@ -165,7 +169,7 @@ bool PDViewer::pre_draw()
             }
         }
         m_postdrawTimer.stopStopWatch();
-        if(_DB) spdlog::info(">>> PDViewer::Frame - After post draw");
+        if (_DB) spdlog::info(">>> PDViewer::Frame - After post draw");
     }
 
     m_frameTimer.stopStopWatch();
@@ -174,6 +178,7 @@ bool PDViewer::pre_draw()
 
 bool PDViewer::mouse_down(int button, int modifier)
 {
+    if (g_Gizmo.visible && ImGuizmo::IsOver()) return true;
     if (!isSceneInterationActive) return true;
     if (modifier != GLFW_MOD_CONTROL) return false;
     float x = viewer->current_mouse_x - (m_sceneWindowPos.x - m_imguiContext->root_window_pos.x + m_sceneCursorPos.x);
@@ -200,6 +205,7 @@ bool PDViewer::mouse_down(int button, int modifier)
 
 bool PDViewer::mouse_move(int button, int modifier)
 {
+    if (g_Gizmo.visible && ImGuizmo::IsOver()) return true;
     if (!isSceneInterationActive) return true;
     if (!g_InteractState.draggingState.isDragging) return false;
     auto curr_mouse = Eigen::RowVector3d(
@@ -368,6 +374,167 @@ void PDViewer::OperationWindow()
     { // Drag Force
         if (ImGui::CollapsingHeader("Dragging", ImGuiTreeNodeFlags_DefaultOpen)) {
             ImGui::InputFloat("Dragging force strength", &g_InteractState.draggingState.forceStrength, 1.f, 10.f, "%.6f");
+        }
+    }
+
+    { // Operation objects
+        auto HRPD_sim = dynamic_cast<HRPDSimulator*>(m_sim.get());
+        if (ImGui::CollapsingHeader("Operation Objects", ImGuiTreeNodeFlags_DefaultOpen) && HRPD_sim) {
+            // obj list
+            auto& objs = HRPD_sim->m_OpManager.m_operationObjects;
+            auto& objSelectInd = HRPD_sim->m_OpManager.m_selectObjectIndex;
+            if (objs.size()) {
+                ImGui::Separator();
+                for (int i = 0; i < objs.size(); i++) {
+                    char buf[32];
+                    sprintf(buf, "#%.3i | %s", i, "Object");
+                    // .data() and .c_str() cannot work.
+                    // std::string curLabel = std::string("### Object ") + std::to_string(i);
+                    if (ImGui::Selectable(buf, objSelectInd == i)) {
+                        if (objSelectInd == i) {
+                            objSelectInd = -1;
+                        }
+                        else {
+                            objSelectInd = i;
+                            g_Gizmo.T = HRPD_sim->m_OpManager.m_operationObjects[objSelectInd]->m_gizmoT.cast<float>();
+                        }
+                    }
+                }
+            }
+
+            // add & del obj
+            static int objTypeInd = 0;
+            ImGui::Combo("Type", &objTypeInd, OperationObjectTypeStrs, IM_ARRAYSIZE(OperationObjectTypeStrs));
+            if (ImGui::Button(" + ", buttonSize)) {
+                // spdlog::info(">>> Add object - type = {}", OperationObjectTypeStrs[objTypeInd]);
+                HRPD_sim->m_OpManager.AddOperationObject(OperationObjectTypeStrs[objTypeInd]);
+            }
+            if (HRPD_sim->m_OpManager.m_selectObjectIndex != -1) {
+                ImGui::SameLine();
+                if (ImGui::Button("Del", buttonSize)) {
+                    // HRPD_sim->m_OpManager.del...
+                    HRPD_sim->m_OpManager.DelOperationObject(&g_Viewer);
+                }
+            }
+        }
+
+        ImGui::Separator();
+
+        if (ImGui::CollapsingHeader("Transform", ImGuiTreeNodeFlags_DefaultOpen) && HRPD_sim) {
+            if (HRPD_sim->m_OpManager.m_selectObjectIndex == -1) {
+                ImGui::TextDisabled("No entity selected.");
+            }
+            else {
+                // gizmo operation type
+                if (ImGui::RadioButton("Translate", g_Gizmo.operation == ImGuizmo::TRANSLATE))
+                    g_Gizmo.operation = ImGuizmo::TRANSLATE;
+                // Currently not use ROTATE
+                // ImGui::SameLine();
+                // if (ImGui::RadioButton("Rotate", g_Gizmo.operation ==ImGuizmo::ROTATE))
+                //     g_Gizmo.operation = ImGuizmo::ROTATE;
+                ImGui::SameLine();
+                if (ImGui::RadioButton("Scale", g_Gizmo.operation == ImGuizmo::SCALE))
+                    g_Gizmo.operation = ImGuizmo::SCALE;
+
+                // ################### Object info ###################
+                PD::PD3dVector curLength;
+                // Center
+                auto& entity = HRPD_sim->m_OpManager.m_operationObjects[HRPD_sim->m_OpManager.m_selectObjectIndex];
+                float _center[3];
+                for (int i = 0; i < 3; i++) _center[i] = entity->m_center(i);
+                ImGui::InputFloat3("Object Center", _center);
+                for (int i = 0; i < 3; i++) entity->m_center(i) = _center[i];
+
+                // For GRIP_CUBE
+                if (std::dynamic_pointer_cast<GripCube>(entity)) {
+                    auto gripCube = std::dynamic_pointer_cast<GripCube>(entity);
+                    // Scale length
+                    float _len[3];
+                    for (int i = 0; i < 3; i++) _len[i] = gripCube->m_length(i);
+                    ImGui::InputFloat3("Cube Length", _len);
+                    for (int i = 0; i < 3; i++) curLength(i) = _len[i];
+                    gripCube->SetLength(curLength);
+                }
+                // For COLLISION_CUBE
+                if (std::dynamic_pointer_cast<CollisionCube>(entity)) {
+                    auto collisionCube = std::dynamic_pointer_cast<CollisionCube>(entity);
+
+                    ImGui::Separator();
+                    // Scale length
+                    float _len[3];
+                    for (int i = 0; i < 3; i++)
+                        _len[i] = collisionCube->m_length(i);
+                    ImGui::InputFloat3("Cube Length", _len);
+                    for (int i = 0; i < 3; i++) curLength(i) = _len[i];
+                    collisionCube->SetLength(curLength);
+                    // Move - Rotate & Translate
+                    if (collisionCube->m_isRotate == true) {
+                        int rtInds[2];
+                        rtInds[0] = collisionCube->m_rotateEdgeInds.first,
+                        rtInds[1] = collisionCube->m_rotateEdgeInds.second;
+                        ImGui::InputInt2("Rotate Inds", rtInds);
+                        collisionCube->initRotate({ rtInds[0], rtInds[1] }, collisionCube->m_moveVel);
+                    }
+                    else {
+                        float curDir[3];
+                        for (int k = 0; k < 3; k++)
+                            curDir[k] = collisionCube->m_translateDir(k);
+                        ImGui::InputFloat3("Move Dir", curDir);
+                        for (int k = 0; k < 3; k++) {
+                            collisionCube->m_translateDir(k) = curDir[k];
+                            if (collisionCube->m_translateDir(k) != 0) {
+                                collisionCube->m_isTranslate = true;
+                            }
+                        }
+                    }
+                    ImGui::InputDouble("Move Vel", &collisionCube->m_moveVel);
+                    ImGui::InputInt("Move Count", &collisionCube->m_maxMove);
+                }
+                // For COLLISION_SPHERE
+                if (std::dynamic_pointer_cast<CollisionSphere>(entity)) {
+                    auto collisionSphere = std::dynamic_pointer_cast<CollisionSphere>(entity);
+
+                    ImGui::Separator();
+                    // Scale length
+                    float _len[3];
+                    for (int i = 0; i < 3; i++)
+                        _len[i] = collisionSphere->m_length(i);
+                    ImGui::InputFloat3("Cube Length", _len);
+                    for (int i = 0; i < 3; i++) curLength(i) = _len[i];
+                    collisionSphere->SetLength(curLength);
+
+                    float curDir[3];
+                    for (int k = 0; k < 3; k++)
+                        curDir[k] = collisionSphere->m_translateDir(k);
+                    ImGui::InputFloat3("Move Dir", curDir);
+                    for (int k = 0; k < 3; k++)
+                        collisionSphere->m_translateDir(k) = curDir[k];
+
+                    ImGui::InputDouble("Move Vel", &collisionSphere->m_moveVel);
+                    ImGui::InputInt("Move Count", &collisionSphere->m_maxMove);
+                }
+
+                ImGui::Separator();
+            }
+        }
+
+        // ####################################################################################
+        if (ImGui::CollapsingHeader("Operation Setup",
+                ImGuiTreeNodeFlags_DefaultOpen)) {
+            std::string curOperationInfo = "Current Operation Preset: ";
+            static int curPresetIndex = 0;
+            curOperationInfo += OperationPresets[curPresetIndex];
+
+            ImGui::BulletText("%s", curOperationInfo.c_str());
+
+            ImGui::Combo("Preset", &curPresetIndex, OperationPresets, IM_ARRAYSIZE(OperationPresets));
+
+            if (ImGui::Button("Load Preset", buttonSize)) {
+                if (HRPD_sim) {
+                    HRPD_sim->m_OpManager.m_presetIndex = curPresetIndex;
+                    HRPD_sim->m_OpManager.SetupPreset(&g_Viewer);
+                }
+            }
         }
     }
 

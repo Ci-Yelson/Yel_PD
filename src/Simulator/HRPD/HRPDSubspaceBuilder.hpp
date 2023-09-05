@@ -59,8 +59,8 @@ struct SubspaceBuilder {
     PDTets m_sampledTetsForUsedVs;
 
     // For online compuation
-    PDMatrix ms_VTJT;
-    PDMatrix ms_UTSTWiV;
+    PDMatrix ms_VTJT;       // [(ks + 1) x 3kt]
+    PDMatrix ms_UTSTWiV;    // [4k x (ks + 1)]
 
     // Solver
     PDDenseSolver m_fittingSolver;
@@ -88,6 +88,11 @@ struct SubspaceBuilder {
     // ---- But why not directly solve (UT * M * U) * x_{sub} = (UT * M) * q_{full} ?
     // PDDenseLLTSolver m_usedSubspaceSolverDense;
     PDSparseSolver m_usedSubspaceSolverSparse;
+
+#ifdef PD_USE_CUDA
+    CUDASparseMatrixVectorMultiplier* m_vPosGPUUpdater = nullptr;
+    CUDASparseMatrixVectorMultiplier* m_vsPosGPUUpdater = nullptr;
+#endif
 
 public:
     void Init(std::shared_ptr<HRPDTetMesh> mesh);

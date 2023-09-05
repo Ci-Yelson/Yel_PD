@@ -8,13 +8,12 @@
 #include "Simulator/HRPD/HRPDSimulator.hpp"
 #include "Simulator/HRPD/HRPDSubspaceBuilder.hpp"
 #include "Simulator/PDTypeDef.hpp"
+#include "Simulator/HRPD/CUDA/CUDAMatrixOP.hpp"
 
 #include "UI/InteractState.hpp"
 #include "Util/Profiler.hpp"
 #include "Util/StoreData.hpp"
 #include "Util/Timer.hpp"
-// #include "Util/MathHelper.hpp"
-
 #include "spdlog/spdlog.h"
 
 extern UI::InteractState g_InteractState;
@@ -26,6 +25,8 @@ namespace PD {
 HRPDSimulator::HRPDSimulator(std::shared_ptr<HRPDTetMesh> tetMesh)
     : m_mesh(tetMesh)
 {
+    m_OpManager.Setup(tetMesh);
+
     m_fExt.setZero(m_mesh->m_positions.rows(), 3);
     m_fGravity.setZero(m_mesh->m_positions.rows(), 3);
 
@@ -103,7 +104,12 @@ void HRPDSimulator::PreCompute()
         m_subspaceRHSSparse_mom = m_subspaceRHS_mom.sparseView(0, PD_SPARSITY_CUTOFF);
 
         m_subspaceLHS_inner.setZero(UTMU.rows(), UTMU.rows());
+#ifdef PD_USE_CUDA
+        PDSparseMatrix mid = _sub.m_ST * _sub.m_weightMatrixForProj * _sub.m_ST.transpose();
+        CUDAMatrixUTMU(_sub.m_U, mid, m_subspaceLHS_inner);
+#else
         m_subspaceLHS_inner += (_sub.m_UT * (_sub.m_ST * _sub.m_weightMatrixForProj * _sub.m_ST.transpose()) * _sub.m_U);
+#endif
         PDMatrix lhsMatrix = m_subspaceLHS_mom * m_dt2inv + (g_InteractState.hrpdParams.wi / m_mesh->m_stiffness_weight) * m_subspaceLHS_inner;
         PDSparseMatrix lhsMatrixSampledSparse = lhsMatrix.sparseView(0, PD_SPARSITY_CUTOFF);
         m_subspaceSystemSolverSparse.compute(lhsMatrixSampledSparse);
@@ -248,6 +254,12 @@ void HRPDSimulator::Step()
         m_velocitiesSubspace = (m_positionsSubspace - ms_prevPositionsSub) / m_dt;
     }
 
+    { // Operation objects step
+        PROFILE_STEP("OP_OBJECTS_STEP");
+        if (_debug) spdlog::info("> HRPDSimulator::Step() - OP_OBJECTS_STEP");
+        m_OpManager.Step(m_dt);
+    }
+
     m_frameCount++;
 }
 
@@ -260,6 +272,11 @@ void HRPDSimulator::Reset()
         m_collisionCorrection = false;
         m_subspaceBuilder.m_velocitiesUsedVsRepulsion.setZero();
     }
+
+    {
+        m_OpManager.Reset();
+    }
+
 
     { // reset showdata
         m_innerForceInterpol.setZero();
@@ -294,6 +311,7 @@ void HRPDSimulator::ComputeWeightedExtForces()
 
 void HRPDSimulator::handleGripAndCollisionsUsedVs(PDPositions& s, bool update)
 {
+    PROFILE_STEP("COLLISION_HANDLE");
     auto& sub = m_subspaceBuilder;
     m_collisionCorrection = false;
     bool gripCorrection = false;
@@ -314,28 +332,28 @@ void HRPDSimulator::handleGripAndCollisionsUsedVs(PDPositions& s, bool update)
             }
         }
         // -- Collision
-        // for (auto& obj : m_operationObjects) {
-        //     auto colObj = std::dynamic_pointer_cast<Entity::CollisionObject>(obj);
-        //     if (colObj != nullptr) {
-        //         PD3dVector posV = pos.row(v);
-        //         if (colObj->resolveCollision(posV)) {
-        //             m_collisionCorrection = true;
-        //             pos.row(v) = posV.transpose();
-        //         }
-        //     }
-        // }
+        for (auto& obj : m_OpManager.m_operationObjects) {
+            auto colObj = std::dynamic_pointer_cast<CollisionObject>(obj);
+            if (colObj != nullptr) {
+                PD3dVector posV = pos.row(v);
+                if (colObj->ResolveCollision(posV)) {
+                    m_collisionCorrection = true;
+                    pos.row(v) = posV.transpose();
+                }
+            }
+        }
         // -- Grip
-        // for (auto& obj : m_operationObjects) {
-        //     auto gripObj = std::dynamic_pointer_cast<Entity::GripObject>(obj);
-        //     if (gripObj != nullptr) {
-        //         PD3dVector posV = pos.row(v);
-        //         PD3dVector initPosV = m_restPositions.row(m_usedVertices[v]);
-        //         if (gripObj->resolveGrip(posV, initPosV)) {
-        //             gripCorrection = true;
-        //             pos.row(v) = posV.transpose();
-        //         }
-        //     }
-        // }
+        for (auto& obj : m_OpManager.m_operationObjects) {
+            auto gripObj = std::dynamic_pointer_cast<GripObject>(obj);
+            if (gripObj != nullptr) {
+                PD3dVector posV = pos.row(v);
+                PD3dVector prevPosV = m_mesh->m_positions.row(m_subspaceBuilder.m_usedVertices[v]);
+                if (gripObj->ResolveGrip(posV)) {
+                    gripCorrection = true;
+                    pos.row(v) = prevPosV.transpose();
+                }
+            }
+        }
         velRepulsion.row(v) = 1.0 * (pos.row(v) - velRepulsion.row(v));
     }
 

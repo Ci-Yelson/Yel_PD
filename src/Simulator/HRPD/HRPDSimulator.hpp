@@ -4,6 +4,7 @@ HRPD - Hyper-Reduced Projective Dynamic [2018] [TODO]
 #pragma once
 
 #include "HRPDTetMesh.hpp"
+#include "Simulator/HRPD/HRPDOperationManager.hpp"
 #include "Simulator/HRPD/HRPDSubspaceBuilder.hpp"
 #include "Simulator/PDTypeDef.hpp"
 #include "Simulator/PDSimulator.hpp"
@@ -21,8 +22,8 @@ struct HRPDSimulator : public PDSimulator {
     double m_stiffnessFactor = 1.0;
 
     PDPositions m_restPositionsSubspace; // [4k x 3]
-    PDPositions m_positionsSubspace;     // [4k x 3]
-    PDPositions m_velocitiesSubspace;    // [4k x 3]
+    PDPositions m_positionsSubspace; // [4k x 3]
+    PDPositions m_velocitiesSubspace; // [4k x 3]
 
     // ----------------- Config -----------------
     PDScalar m_dt{ 16 }, m_dt2{ 16 * 16 }, m_dt2inv{ 1.0f / (16 * 16) };
@@ -64,7 +65,7 @@ struct HRPDSimulator : public PDSimulator {
     PDPositions ms_prevPositionsSub;
 
     // ----------------- UI-Operation -----------------
-    // std::vector<std::shared_ptr<Entity::OperationObject>> m_operationObjects;
+    OperationManager m_OpManager;
     // -- For show data
     std::vector<std::string> ShowDataTypeStrs{
         "DISPLACEMENT",
@@ -107,13 +108,17 @@ public:
     void UpdateStiffnessWeight();
     void UpdateTimeStep() override;
 
-    void IGL_SetMesh(igl::opengl::glfw::Viewer* viewer) override { m_mesh->IGL_SetMesh(viewer); }
+    void IGL_SetMesh(igl::opengl::glfw::Viewer* viewer) override
+    {
+        m_mesh->IGL_SetMesh(viewer);
+        m_OpManager.IGL_SetMesh(viewer);
+    }
 
     const PDPositions& GetRestPositions() override { return m_mesh->m_restpose_positions; }
     const PDPositions& GetPositions() override { return m_mesh->m_positions; }
     const PDTriangles& GetTriangles() override { return m_mesh->m_triangles; }
 
-    // ------------------------------- Debug ------------------------------- 
+    // ------------------------------- Debug -------------------------------
     // bool m_debugStep = false;
     // void Debug_StoreData();
 
