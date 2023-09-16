@@ -490,8 +490,8 @@ void SubspaceBuilder::CreateProjectionInterpolationMatrix()
         spdlog::info(">>> GPU Updater Init - Before");
         if (m_vPosGPUUpdater != nullptr) delete m_vPosGPUUpdater;
         m_vPosGPUUpdater = new CUDASparseMatrixVectorMultiplier(m_U_sp);
-        if (m_vsPosGPUUpdater) delete m_vsPosGPUUpdater;
-        m_vsPosGPUUpdater = new CUDASparseMatrixVectorMultiplier(m_U_used_sp);
+        // if (m_vsPosGPUUpdater) delete m_vsPosGPUUpdater;
+        // m_vsPosGPUUpdater = new CUDASparseMatrixVectorMultiplier(m_U_used_sp);
 
         spdlog::info(">>> GPU Updater Init - After");
 #endif

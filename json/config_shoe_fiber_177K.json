@@ -1,7 +1,7 @@
 {
     "meshURL": "models/shoe_fiber_177K.stl",
     "simulatorType": "HRPD",
-    "timeStep": 16,
+    "timeStep": 0.033,
     "isHyperReduced": true,
     "isMultiThreads": false,
     "interpolationFrameSize": 2,
@@ -10,7 +10,7 @@
     "sigmaMin": 1.00,
     "sigmaMax": 1.00,
     "massPerUnitArea": 2,
-    "gravityConstant": 0.00007,
+    "gravityConstant": 0.01,
     "numIterations": 10,
     "numberSamplesForVertexPosSubspace": 150,
     "radiusMultiplierForPosSubspace": 1.1,

@@ -38,7 +38,7 @@ struct PDViewer : public igl::opengl::glfw::ViewerPlugin {
 
     // For floor
     int m_floorMeshID = -1;
-    float m_floorGridSize = 50.0f;
+    float m_floorGridSize = 1.0f;
 
     // For interact, i.g. dragging
     int m_interactMeshID = -1;

@@ -61,4 +61,22 @@ inline void storeData(const Eigen::MatrixXd& pos, const Eigen::MatrixXi& tris, s
     }
     objFile.close();
 }
+
+inline void ExportToObj(const Eigen::MatrixXd& pos, const Eigen::MatrixXi& tris, std::string url)
+{
+    spdlog::info("> Store File: {}", url);
+    std::ofstream objFile;
+    objFile.open(url);
+    objFile.setf(std::ios::fixed);
+    objFile.setf(std::ios::showpoint);
+    objFile.precision(8);
+    for (int v = 0; v < pos.rows(); v++) {
+        objFile << "v " << pos(v, 0) << " " << pos(v, 1) << " " << pos(v, 2) << "\n";
+    }
+    objFile << "\n";
+    for (int f = 0; f < tris.rows(); f++) {
+        objFile << "f  " << (tris(f, 0) + 1) << " " << (tris(f, 1) + 1) << " " << (tris(f, 2) + 1) << "\n";
+    }
+    objFile.close();
+}
 };

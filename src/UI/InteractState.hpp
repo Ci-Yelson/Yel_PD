@@ -11,7 +11,7 @@ struct DraggingState {
     bool isDragging{ false };
     int vertex{ -1 };
     int vertexUsed{ -1 };
-    float forceStrength{ 10.0 };
+    float forceStrength = 0.1;
     Eigen::RowVector3d prevMouse;
     Eigen::RowVector3d force;
 };
@@ -35,6 +35,8 @@ struct InteractState {
     bool isBufferMapping = false;
     bool isUseFullspaceVerticesForCollisionHandling = false; // Seems not work properly
 
+    double dHat = 0.005;
+
     // For HRPD
     struct HRPDParams {
         int numberSamplesForVertexPosSubspace = 150; // [k]
@@ -44,13 +46,12 @@ struct InteractState {
         int numberSampledConstraints = 1000; // [kt]
 
         double massPerUnitArea = 2.0;
-        double gravityConstant = 0.00007;
+        double gravityConstant = 0.0007;
 
         // --------- Physics Params ---------
         float wi = 0.0051;
         float sigmaMin = 1.00f;
         float sigmaMax = 1.00f;
-        float gravityStrength = 0.00007;
     } hrpdParams;
 
     // For QNPD

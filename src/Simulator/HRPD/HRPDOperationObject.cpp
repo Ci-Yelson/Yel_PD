@@ -1,6 +1,10 @@
 #include "Simulator/HRPD/HRPDOperationObject.hpp"
 #include "spdlog/spdlog.h"
 
+#include "UI/InteractState.hpp"
+
+extern UI::InteractState g_InteractState;
+
 namespace PD {
 
 // ########################## Get rotate matrix ##########################
@@ -248,7 +252,9 @@ void CollisionCube::Step(double dt)
         m_center += m_translateDir * m_moveVel * dt;
     }
     else {
-        PDPositions R = getRotationMatrix((m_verts.row(m_rotateEdgeInds.second) - m_verts.row(m_rotateEdgeInds.first)), m_moveVel * dt);
+        // PDPositions R = getRotationMatrix((m_verts.row(m_rotateEdgeInds.second) - m_verts.row(m_rotateEdgeInds.first)), m_moveVel * dt);
+        // Not use dt.
+        PDPositions R = getRotationMatrix((m_verts.row(m_rotateEdgeInds.second) - m_verts.row(m_rotateEdgeInds.first)), m_moveVel);
         m_verts = m_verts * R;
         PD3dVector up_center = ((m_verts.row(0) + m_verts.row(1)) * 0.5 + (m_verts.row(2) + m_verts.row(3)) * 0.5) * 0.5;
         PD3dVector down_center = ((m_verts.row(4) + m_verts.row(5)) * 0.5 + (m_verts.row(6) + m_verts.row(7)) * 0.5) * 0.5;
@@ -266,35 +272,34 @@ bool CollisionCube::ResolveCollision(PD3dVector& pos)
     Eigen::RowVector3d mi = m_verts.colwise().minCoeff();
     Eigen::RowVector3d mx = m_verts.colwise().maxCoeff();
 
-    // CTODO - use barrier function ?
     double strength = 1.0;
 
     if (m_isTranslate == true) {
         // X
         if (m_translateDir.x() != 0) {
             if (m_translateDir.x() > 0)
-                pos.x() += strength * (mx.x() - pos.x());
+                pos.x() += strength * ((mx.x() + g_InteractState.dHat) - pos.x());
             else
-                pos.x() += strength * (mi.x() - pos.x());
+                pos.x() += strength * ((mi.x() - g_InteractState.dHat) - pos.x());
         }
         // Y
         if (m_translateDir.y() != 0) {
             if (m_translateDir.y() > 0)
-                pos.y() += strength * (mx.y() - pos.y());
+                pos.y() += strength * ((mx.y() + g_InteractState.dHat) - pos.y());
             else
-                pos.y() += strength * (mi.y() - pos.y());
+                pos.y() += strength * ((mi.y() - g_InteractState.dHat) - pos.y());
         }
         // Z
         if (m_translateDir.z() != 0) {
             if (m_translateDir.z() > 0)
-                pos.z() += strength * (mx.z() - pos.z());
+                pos.z() += strength * ((mx.z() + g_InteractState.dHat) - pos.z());
             else
-                pos.z() += strength * (mi.z() - pos.z());
+                pos.z() += strength * ((mi.z() - g_InteractState.dHat) - pos.z());
         }
     }
     else if (m_isRotate == true) {
         PD3dVector planeV = m_verts.row(m_rotatePlaneVertInd[0]);
-        double newDotlen = (pos - planeV).dot(m_rotatePlaneNorm);
+        double newDotlen = (pos - planeV).dot(m_rotatePlaneNorm) + g_InteractState.dHat;
         if (newDotlen < 0) {
             pos -= strength * newDotlen * m_rotatePlaneNorm;
         }
@@ -302,13 +307,13 @@ bool CollisionCube::ResolveCollision(PD3dVector& pos)
     else {
         // simplest way, but may not correct
         if (mi.x() < pos.x() && pos.x() < mx.x()) {
-            pos.x() = (mx.x() - pos.x() > pos.x() - mi.x()) ? mi.x() : mx.x();
+            pos.x() = (mx.x() - pos.x() > pos.x() - mi.x()) ? (mi.x() - g_InteractState.dHat) : (mx.x() + g_InteractState.dHat);
         }
         if (mi.y() < pos.y() && pos.y() < mx.y()) {
-            pos.y() = (mx.y() - pos.y() > pos.y() - mi.y()) ? mi.y() : mx.y();
+            pos.y() = (mx.y() - pos.y() > pos.y() - mi.y()) ? (mi.y() - g_InteractState.dHat) : (mx.y() + g_InteractState.dHat);
         }
         if (mi.z() < pos.z() && pos.z() < mx.z()) {
-            pos.z() = (mx.z() - pos.z() > pos.z() - mi.z()) ? mi.z() : mx.z();
+            pos.z() = (mx.z() - pos.z() > pos.z() - mi.z()) ? (mi.z() - g_InteractState.dHat) : (mx.z() + g_InteractState.dHat);
         }
     }
 
@@ -405,9 +410,8 @@ void CollisionSphere::Step(PDScalar dt)
 bool CollisionSphere::ResolveCollision(PD3dVector& pos)
 {
     if ((pos - m_center).norm() < m_length.x() * 0.5) {
-        double strength = 1.0;
         PD3dVector dir = (pos - m_center).normalized();
-        dir *= m_length.x() * 0.5;
+        double strength = m_length.x() * 0.5 + g_InteractState.dHat;
         pos = m_center + strength * dir;
         return true;
     }

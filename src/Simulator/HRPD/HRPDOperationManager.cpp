@@ -81,7 +81,7 @@ void OperationManager::OperationSetupSphere()
 
     {
         // grip cube [floor]
-        double thickness = 3.0f;
+        double thickness = 0.01f;
         PD3dVector center = { (originMi.x() + originMx.x()) * 0.5, originMi.y() + 0.5 * thickness, (originMi.z() + originMx.z()) * 0.5 };
         PD3dVector length3d = { originMx.x() - originMi.x(), thickness, originMx.z() - originMi.z() };
         std::shared_ptr<GripCube> gripCubePtr = std::make_shared<GripCube>(center, length3d);
@@ -90,25 +90,25 @@ void OperationManager::OperationSetupSphere()
 
     {
         // left
-        double offsetX = -50;
-        double offsetY = std::max(0.0, originMx.y() + xlen) - 20;
-        double offsetZ = -10;
+        double offsetX = -0.2;
+        double offsetY = std::max(0.0, originMx.y() + xlen) - 0.1;
+        double offsetZ = -0.05;
         PD3dVector center = { offsetX, offsetY, offsetZ };
         PD3dVector length3d = { xlen, xlen, xlen };
         PD3dVector dir = { 0, -1, 0 };
-        std::shared_ptr<CollisionObject> colObjPtr = std::make_shared<CollisionSphere>(center, length3d, dir, 0.01f);
+        std::shared_ptr<CollisionObject> colObjPtr = std::make_shared<CollisionSphere>(center, length3d, dir, 0.03);
         m_operationObjects.push_back(colObjPtr);
     }
 
     {
         // right
-        double offsetX = 100;
-        double offsetY = std::max(0.0, originMx.y() + xlen) - 20;
-        double offsetZ = -10;
+        double offsetX = 0.35;
+        double offsetY = std::max(0.0, originMx.y() + xlen) - 0.1;
+        double offsetZ = -0.05;
         PD3dVector center = { offsetX, offsetY, offsetZ };
         PD3dVector length3d = { xlen, xlen, xlen };
         PD3dVector dir = { 0, -1, 0 };
-        std::shared_ptr<CollisionObject> colObjPtr = std::make_shared<CollisionSphere>(center, length3d, dir, 0.01f);
+        std::shared_ptr<CollisionObject> colObjPtr = std::make_shared<CollisionSphere>(center, length3d, dir, 0.03);
         m_operationObjects.push_back(colObjPtr);
     }
 }
@@ -121,7 +121,7 @@ void OperationManager::OperationSetupCube()
     Eigen::RowVector3d mi = V.colwise().minCoeff();
     Eigen::RowVector3d mx = V.colwise().maxCoeff();
 
-    double thickness = 5.0;
+    double thickness = 0.01;
 
     {
         // up
@@ -129,7 +129,7 @@ void OperationManager::OperationSetupCube()
         PD3dVector length3d = { mx.x() - mi.x(), thickness, mx.z() - mi.z() };
         std::shared_ptr<CollisionCube> colObjPtr = std::make_shared<CollisionCube>(center, length3d);
         PD3dVector dir = { 0.0, -1.0, 0.0 };
-        colObjPtr->initTranslate(dir, 0.01);
+        colObjPtr->initTranslate(dir, 0.03);
         m_operationObjects.push_back(colObjPtr);
     }
 }
@@ -141,7 +141,7 @@ void OperationManager::OperationSetupRotation()
     Eigen::RowVector3d originMi = V.colwise().minCoeff();
     Eigen::RowVector3d originMx = V.colwise().maxCoeff();
 
-    double left = -10.0, right = 10.0, thickness = 5.0;
+    double left = -0.03, right = 0.03, thickness = 0.03;
     double gripThickness = (originMx.y() - originMi.y()) * 0.5;
 
     {
@@ -164,7 +164,7 @@ void OperationManager::OperationSetupRotation()
 
         std::shared_ptr<CollisionCube> colObjPtr = std::make_shared<CollisionCube>(center, length3d);
         std::pair<int, int> rotateVertInd = { 2, 1 };
-        colObjPtr->initRotate(rotateVertInd, 0.01);
+        colObjPtr->initRotate(rotateVertInd, 0.1);
         m_operationObjects.push_back(colObjPtr);
     }
 
@@ -178,7 +178,7 @@ void OperationManager::OperationSetupRotation()
 
         std::shared_ptr<CollisionCube> colObjPtr = std::make_shared<CollisionCube>(center, length3d);
         std::pair<int, int> rotateVertInd = { 0, 3 };
-        colObjPtr->initRotate(rotateVertInd, 0.01);
+        colObjPtr->initRotate(rotateVertInd, 0.1);
         m_operationObjects.push_back(colObjPtr);
     }
 }

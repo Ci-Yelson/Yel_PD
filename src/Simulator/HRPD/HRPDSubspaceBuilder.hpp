@@ -91,7 +91,7 @@ struct SubspaceBuilder {
 
 #ifdef PD_USE_CUDA
     CUDASparseMatrixVectorMultiplier* m_vPosGPUUpdater = nullptr;
-    CUDASparseMatrixVectorMultiplier* m_vsPosGPUUpdater = nullptr;
+    // CUDASparseMatrixVectorMultiplier* m_vsPosGPUUpdater = nullptr;
 #endif
 
 public:

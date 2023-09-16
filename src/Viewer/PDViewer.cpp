@@ -28,27 +28,21 @@ void PDViewer::Setup()
     // Config floor mesh for draw
     spdlog::info("> PDViewer::setup - Before");
     {
-        // auto _mi = m_sim->getInitPositions().colwise().minCoeff();
-        // auto _mx = m_sim->getInitPositions().colwise().maxCoeff();
-        // m_floorGridSize = 50 * std::min({ _mx.x() - _mi.x(), _mx.y() - _mi.y(), _mx.z() - _mi.z() });
-
         if (m_floorMeshID == -1) {
             spdlog::info("> PDViewer::setup - m_floorMeshID = {}", m_floorMeshID);
             m_floorMeshID = viewer->append_mesh(g_InteractState.isFloorActive);
             spdlog::info("> PDViewer::setup - m_floorMeshID = {}", m_floorMeshID);
         }
-        float gridSize = m_floorGridSize;
-        // spdlog::info("PDViewer::pre_draw - floorGridSize = {}", m_floorGridSize);
-        float step = gridSize / 50;
+        double gridSize = m_floorGridSize;
+        double step = gridSize / 25;
         Eigen::RowVector3d C;
-        for (float f = -gridSize; f <= gridSize; f += step) {
-            // double y = m_floorHeight;
+        for (double f = -gridSize; f <= gridSize; f += step) {
             double y = 0.;
             Eigen::RowVector3d p1 = { f, y, -gridSize };
             Eigen::RowVector3d p2 = { f, y, gridSize };
             Eigen::RowVector3d p3 = { -gridSize, y, f };
             Eigen::RowVector3d p4 = { gridSize, y, f };
-            if (f == 0)
+            if (std::abs(f) < 1e-12)
                 C = { 0.0, 0.0, 0.0 };
             else
                 C = { 0.8, 0.8, 0.8 };
@@ -313,6 +307,21 @@ void PDViewer::SimulatorInfoWindow()
             m_sim->LoadParamsAndApply();
         }
     }
+
+    { // Colormap for HRPD
+        auto hrpd = dynamic_cast<HRPDSimulator*>(m_sim.get());
+        if (hrpd) {
+            if (ImGui::CollapsingHeader("ColorMap", ImGuiTreeNodeFlags_DefaultOpen)) {
+                for (int i =0; i < hrpd->ColorMapTypeStrs.size(); i++) {
+                    auto& str = hrpd->ColorMapTypeStrs[i];
+                    if (hrpd->ColorMapTypeActive[str]) {
+                        ImGui::RadioButton(str.c_str(), &hrpd->m_colorMapType, i);
+                    }
+                }
+            }
+        }
+    }
+
     ImGui::End();
 }
 

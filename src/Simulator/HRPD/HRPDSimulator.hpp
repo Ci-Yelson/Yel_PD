@@ -66,8 +66,10 @@ struct HRPDSimulator : public PDSimulator {
 
     // ----------------- UI-Operation -----------------
     OperationManager m_OpManager;
-    // -- For show data
-    std::vector<std::string> ShowDataTypeStrs{
+    // For Color Map
+    int m_colorMapType = 0;
+    bool isUniformColorMap = true;
+    std::vector<std::string> ColorMapTypeStrs{
         "DISPLACEMENT",
         "INNER_FORCE_INTERPOL",
         "PD_ENERGY",
@@ -75,24 +77,18 @@ struct HRPDSimulator : public PDSimulator {
         "PD_INNER_FORCE_FULL",
         "STVK_INNER_FORCE_FULL"
     };
-    std::map<std::string, bool> ShowDataTypeIsUsed{
+    std::map<std::string, bool> ColorMapTypeActive{
         { "DISPLACEMENT", true },
         { "INNER_FORCE_INTERPOL", true },
         { "PD_ENERGY", true },
         { "STVK_ENERGY", true },
-        { "PD_INNER_FORCE_FULL", true },
-        { "STVK_INNER_FORCE_FULL", true }
+        { "PD_INNER_FORCE_FULL", false },
+        { "STVK_INNER_FORCE_FULL", false }
     };
-    std::vector<Eigen::Matrix<PDScalar, 4, 3>> m_selectionMatrixTPerTet;
     PDPositions m_innerForceSubspace;
     PDPositions m_innerForceInterpol;
-    PDMatrix m_pdE, m_stvkE;
-    std::vector<Eigen::Matrix<PDScalar, 3, 4>> m_innerForcePerTetSTVK;
-    PDPositions m_innerForceFullSTVK;
-    std::vector<Eigen::Matrix<PDScalar, 4, 3>> m_innerForcePerTetPD;
-    PDPositions m_innerForceFullPD;
-    // ---- For uniform show data
-    std::vector<std::vector<int>> m_adjVerts1rd, m_adjVerts2rd;
+    PDMatrix m_PD_E;
+    PDMatrix m_STVK_E;
 
 public:
     HRPDSimulator(std::shared_ptr<HRPDTetMesh> tetMesh);
@@ -110,7 +106,7 @@ public:
 
     void IGL_SetMesh(igl::opengl::glfw::Viewer* viewer) override
     {
-        m_mesh->IGL_SetMesh(viewer);
+        m_mesh->IGL_SetMesh(viewer, GetColorMapData());
         m_OpManager.IGL_SetMesh(viewer);
     }
 
@@ -131,7 +127,7 @@ private:
 public:
     // ----------------- API -----------------
 
-    // PDMatrix getShowData();
+    Eigen::MatrixXd GetColorMapData();
     void SetGravity(PDScalar gravityConstant);
     // void setFloor(PDScalar height, PDScalar floorCollisionWeight);
 };

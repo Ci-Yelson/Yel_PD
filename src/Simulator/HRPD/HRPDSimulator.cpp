@@ -277,13 +277,10 @@ void HRPDSimulator::Reset()
         m_OpManager.Reset();
     }
 
-
-    { // reset showdata
+    {
         m_innerForceInterpol.setZero();
-        m_pdE.setZero();
-        m_stvkE.setZero();
-        m_innerForceFullSTVK.setZero();
-        m_innerForceFullPD.setZero();
+        m_PD_E.setZero();
+        m_STVK_E.setZero();
     }
 }
 
@@ -464,6 +461,126 @@ void HRPDSimulator::SetGravity(PDScalar gravityConstant)
         m_fGravity(v, 1) = -gravityConstant * m_mesh->m_vertexMasses(v);
     }
     ComputeWeightedExtForces();
+}
+
+Eigen::MatrixXd HRPDSimulator::GetColorMapData()
+{
+    if (m_colorMapType == 0) { // DISPLACEMENT
+        return (m_mesh->m_positions - m_mesh->m_restpose_positions).cast<double>().rowwise().norm();
+    }
+    else if (m_colorMapType == 1) { // INNER_FORCE_INTERPOL
+        // todo
+        auto& _sub = m_subspaceBuilder;
+        // rhs2 - (UT @ M/h^2 @ U @ s) + (UT @ ST @ WI @ V @ subP)
+        // rhs1 - UT @ ST @ WI @ V @ subP
+        rhs1.setZero(_sub.m_U.cols(), 3);
+        {
+            auto& sub = m_subspaceBuilder;
+            VTJTPused.resize(sub.m_V.cols(), 3);
+            VPsub.resize(sub.m_V.cols(), 3);
+            sub.InterpolateSubspaceToFullspaceForPos(_sub.m_positionsUsedVs, m_positionsSubspace, true);
+            // Collect auxiliary variables for sampled constraints
+            sub.GetUsedP();
+            // Set up rhs from auxiliaries and solve the system for all three columns
+            PD_PARALLEL_FOR
+            for (int d = 0; d < 3; d++) {
+                // VT * JT * P_{partial}
+                VTJTPused.col(d) = sub.ms_VTJT * sub.m_projectionsUsedVs.col(d);
+                // V * P_{sub}
+                VPsub.col(d) = sub.m_fittingSolver.solve(VTJTPused.col(d));
+
+                // Apply finalization matrix and add to current rhs
+                rhs1.col(d) += (g_InteractState.hrpdParams.wi / m_mesh->m_stiffness_weight) * sub.ms_UTSTWiV * VPsub.col(d);
+            }
+        }
+        // - ( UT * (ST * WI * S) * U  -  UT @ ST @ WI @ V @ subP)
+        m_innerForceSubspace = -(m_subspaceLHS_inner * m_positionsSubspace - rhs1);
+        m_innerForceInterpol.resize(_sub.m_U_sp.rows(), 3);
+        PD_PARALLEL_FOR
+        for (int d = 0; d < 3; d++) {
+            m_innerForceInterpol.col(d) = _sub.m_U_sp * m_innerForceSubspace.col(d);
+        }
+        if (isUniformColorMap) {
+            auto tmp = m_innerForceInterpol;
+            PD_PARALLEL_FOR
+            for (int v = 0; v < m_mesh->m_positions.rows(); v++) {
+                m_innerForceInterpol.row(v).setZero();
+                for (auto nv : m_mesh->m_adjVerts2rd[v]) {
+                    m_innerForceInterpol.row(v) += tmp.row(nv);
+                }
+                m_innerForceInterpol.row(v) /= (m_mesh->m_adjVerts2rd[v].size() + 1);
+            }
+        }
+
+        return m_innerForceInterpol;
+    }
+    else if (m_colorMapType == 2) { // PD_ENERGY
+        m_PD_E.setZero(m_mesh->m_positions.rows(), 1);
+        std::vector<PDScalar> tetsE(m_mesh->m_tets.rows());
+        PD_PARALLEL_FOR
+        for (int tInd = 0; tInd < m_mesh->m_tets.rows(); tInd++) {
+            PDPositions pos(4, 3);
+            for (int k = 0; k < 4; k++) {
+                pos.row(k) = m_mesh->m_positions.row(m_mesh->m_tets(tInd, k));
+            }
+            tetsE[tInd] = m_mesh->GetPDEnergy(pos, tInd);
+        }
+        PD_PARALLEL_FOR
+        for (int v = 0; v < m_mesh->m_positions.rows(); v++) {
+            for (auto tp : m_mesh->m_tetsPerVertex[v]) {
+                m_PD_E(v, 0) += tetsE[tp.first];
+            }
+            m_PD_E(v, 0) /= 4.0;
+        }
+        if (isUniformColorMap) {
+            auto tmp = m_PD_E;
+            PD_PARALLEL_FOR
+            for (int v = 0; v < m_mesh->m_positions.rows(); v++) {
+                m_PD_E.row(v).setZero();
+                for (auto nv : m_mesh->m_adjVerts2rd[v]) {
+                    m_PD_E.row(v) += tmp.row(nv);
+                }
+                m_PD_E.row(v) /= (m_mesh->m_adjVerts2rd[v].size() + 1);
+            }
+        }
+        return m_PD_E.rowwise().norm();
+    }
+    else if (m_colorMapType == 3) { // STVK_ENERGY
+        std::vector<PDScalar> tetsE(m_mesh->m_tets.rows());
+        PD_PARALLEL_FOR
+        for (int tInd = 0; tInd < m_mesh->m_tets.rows(); tInd++) {
+            PDPositions pos(4, 3);
+            for (int k = 0; k < 4; k++) {
+                pos.row(k) = m_mesh->m_positions.row(m_mesh->m_tets(tInd, k));
+            }
+            tetsE[tInd] = m_mesh->GetStvkEnergy(pos, tInd);
+        }
+        m_STVK_E.resize(m_mesh->m_positions.rows(), 1);
+        PD_PARALLEL_FOR
+        for (int v = 0; v < m_mesh->m_positions.rows(); v++) {
+            m_STVK_E(v, 0) = 0;
+            for (auto tp :m_mesh->m_tetsPerVertex[v]) {
+                m_STVK_E(v, 0) += tetsE[tp.first];
+            }
+            m_STVK_E(v, 0) /= 4.0;
+        }
+        if (isUniformColorMap) {
+            auto tmp = m_STVK_E;
+            PD_PARALLEL_FOR
+            for (int v = 0; v < m_mesh->m_positions.rows(); v++) {
+                m_STVK_E.row(v).setZero();
+                for (auto nv : m_mesh->m_adjVerts2rd[v]) {
+                    m_STVK_E.row(v) += tmp.row(nv);
+                }
+                m_STVK_E.row(v) /= (m_mesh->m_adjVerts2rd[v].size() + 1);
+            }
+        }
+        return m_STVK_E.rowwise().norm();
+    }
+    else {
+        // todo
+        return Eigen::MatrixXd::Zero(m_mesh->m_positions.rows(), 1);
+    }
 }
 
 }

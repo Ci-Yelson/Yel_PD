@@ -51,6 +51,7 @@ public:
             spdlog::info(">>> OperationObject - IGL_DelMesh, meshID = {}", m_meshID);
             viewer->data(m_meshID).clear();
             viewer->erase_mesh(m_meshID);
+            m_meshID = -1;
         }
     }
 };

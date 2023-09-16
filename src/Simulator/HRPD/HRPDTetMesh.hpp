@@ -57,11 +57,14 @@ struct HRPDTetMesh {
     CUDABufferMapping* m_GPUBufferMapper_V_specular_vbo = nullptr;
 #endif
 
+    // ---- For uniform show data
+    std::vector<std::vector<int>> m_adjVerts1rd, m_adjVerts2rd;
+    std::vector<std::vector<std::pair<unsigned int, unsigned int>>> m_tetsPerVertex;
+
 public:
     HRPDTetMesh(std::string meshURL);
     
     void InitTetConstraints(PDScalar stiffness_weight, PDScalar sigmaMax, PDScalar sigmaMin);
-
     // S_i - [3 x N]
     PDSparseMatrixRM GetSelectionMatrix(unsigned int index);
     // ST - [N x 3e]
@@ -69,6 +72,10 @@ public:
     // positions - [4 x 3]
     EigenMatrix3 GetP(int tInd);
     EigenMatrix3 GetP(int tInd, EigenMatrix3 edges);
+    
+    EigenMatrix3 GetP_Corotated(int tInd);
+    EigenMatrix3 GetP_Volume(int tInd);
+
     PDScalar GetPDEnergy(PDPositions& positions, int tInd);
     PDScalar GetStvkEnergy(PDPositions& positions, int tInd);
 
@@ -89,6 +96,6 @@ public:
         m_positions = pos;
         m_velocities = vel;
     }
-    void IGL_SetMesh(igl::opengl::glfw::Viewer* viewer);
+    void IGL_SetMesh(igl::opengl::glfw::Viewer* viewer, Eigen::MatrixXd colorMapData);
 };
 } // namespace PD

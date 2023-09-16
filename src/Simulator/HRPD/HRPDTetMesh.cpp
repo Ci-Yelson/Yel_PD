@@ -81,7 +81,16 @@ HRPDTetMesh::HRPDTetMesh(std::string meshURL)
     spdlog::info("Mesh loaded: {} vertices, {} faces", m_positions.rows(), m_triangles.rows());
 
     {
-        auto miY = m_positions.col(1).minCoeff();
+        // Scale Mesh -> 1 x 1 x 1 box.
+        spdlog::info("Scale Mesh -> 1 x 1 x 1 box.");
+        double len = std::max({ m_positions.col(0).maxCoeff() - m_positions.col(0).minCoeff(),
+            m_positions.col(1).maxCoeff() - m_positions.col(1).minCoeff(),
+            m_positions.col(2).maxCoeff() - m_positions.col(2).minCoeff() });
+        double factor = 1.0 / len;
+        m_positions *= factor;
+
+        // Move Mesh - Make sure Y coordinate > 0
+        auto miY = m_positions.col(1).minCoeff() - g_InteractState.dHat;
         if (miY < 0.0) {
             spdlog::info("Move Mesh - Make sure Y coordinate > 0.");
             for (int v = 0; v < m_positions.rows(); v++) {
@@ -148,6 +157,44 @@ HRPDTetMesh::HRPDTetMesh(std::string meshURL)
         m_normalizationMass = 1.0 / totalMass;
         spdlog::info("Normalize vertex mass: {}", m_normalizationMass);
         m_vertexMasses *= m_normalizationMass * g_InteractState.hrpdParams.massPerUnitArea;
+    }
+
+    { // For uniform show data - Establish neighbourhood structure for tets or triangles
+        m_adjVerts1rd.resize(m_positions.rows());
+        m_adjVerts2rd.resize(m_positions.rows());
+        for (int i = 0; i < m_tets.rows(); i++) {
+            for (int j = 0; j < 4; j++) {
+                for (int k = j + 1; k < 4; k++) {
+                    m_adjVerts1rd[m_tets(i, j)].push_back(m_tets(i, k));
+                    m_adjVerts1rd[m_tets(i, k)].push_back(m_tets(i, j));
+                }
+            }
+        }
+        for (int v = 0; v < m_positions.rows(); v++) {
+            for (auto nv1 : m_adjVerts1rd[v]) {
+                {
+                    auto fd = std::find(m_adjVerts2rd[v].begin(), m_adjVerts2rd[v].end(), nv1);
+                    if (fd == m_adjVerts2rd[v].end()) {
+                        m_adjVerts2rd[v].push_back(nv1);
+                    }
+                }
+                for (auto nv2 : m_adjVerts1rd[nv1]) {
+                    auto fd = std::find(m_adjVerts2rd[v].begin(), m_adjVerts2rd[v].end(), nv2);
+                    if (fd == m_adjVerts2rd[v].end()) {
+                        m_adjVerts2rd[v].push_back(nv2);
+                    }
+                }
+            }
+        }
+        // Build tetsPerVertex
+        m_tetsPerVertex.clear();
+        m_tetsPerVertex.resize(m_positions.rows());
+        for (int i = 0; i < m_tets.rows(); i++) {
+            for (int v = 0; v < 4; v++) {
+                unsigned int vInd = m_tets(i, v);
+                m_tetsPerVertex[vInd].push_back({ i, v });
+            }
+        }
     }
 }
 
@@ -298,6 +345,80 @@ EigenMatrix3 HRPDTetMesh::GetP(int tInd, EigenMatrix3 edges)
     return FStar.transpose();
 }
 
+EigenMatrix3 HRPDTetMesh::GetP_Corotated(int tInd)
+{
+    // 3d edges of tet
+    Eigen::Matrix<PDScalar, 3, 3> edges;
+    edges.col(0) = (m_positions.row(m_tets(tInd, 1)) - m_positions.row(m_tets(tInd, 0)));
+    edges.col(1) = (m_positions.row(m_tets(tInd, 2)) - m_positions.row(m_tets(tInd, 0)));
+    edges.col(2) = (m_positions.row(m_tets(tInd, 3)) - m_positions.row(m_tets(tInd, 0)));
+
+    // Compute the deformation gradient (current edges times inverse of original edges)
+    Eigen::Matrix<PDScalar, 3, 3> F = edges * m_restEdgesInv[tInd];
+
+    auto PolarDecomposition = [](const Eigen::Matrix<PDScalar, 3, 3>& F, Eigen::Matrix<PDScalar, 3, 3>& R, Eigen::Matrix<PDScalar, 3, 3>& S) {
+        const Eigen::JacobiSVD<Eigen::Matrix<PDScalar, 3, 3>> svd(F, Eigen::ComputeFullU | Eigen::ComputeFullV);
+        const Eigen::Matrix<PDScalar, 3, 3> Sig = svd.singularValues().asDiagonal();
+        const Eigen::Matrix<PDScalar, 3, 3> U = svd.matrixU();
+        const Eigen::Matrix<PDScalar, 3, 3> V = svd.matrixV();
+        R = U * V.transpose();
+        S = V * Sig * V.transpose();
+    };
+
+    Eigen::Matrix<PDScalar, 3, 3> R, S;
+    PolarDecomposition(F, R, S);
+    return R;
+}
+
+EigenMatrix3 HRPDTetMesh::GetP_Volume(int tInd)
+{
+    // 3d edges of tet
+    Eigen::Matrix<PDScalar, 3, 3> edges;
+    edges.col(0) = (m_positions.row(m_tets(tInd, 1)) - m_positions.row(m_tets(tInd, 0)));
+    edges.col(1) = (m_positions.row(m_tets(tInd, 2)) - m_positions.row(m_tets(tInd, 0)));
+    edges.col(2) = (m_positions.row(m_tets(tInd, 3)) - m_positions.row(m_tets(tInd, 0)));
+
+    // Compute the deformation gradient (current edges times inverse of original edges)
+    Eigen::Matrix<PDScalar, 3, 3> F = edges * m_restEdgesInv[tInd];
+    // Compute SVD
+    Eigen::JacobiSVD<Eigen::Matrix<PDScalar, 3, 3>> svd(F, Eigen::ComputeFullU | Eigen::ComputeFullV);
+    PD3dVector sig = svd.singularValues();
+    PDMatrix U = svd.matrixU();
+    PDMatrix V = svd.matrixV();
+    // F = U * sig * V.transpose();
+    // Now solve the problem:
+    // min \|sig - sig*\|^2
+    // s.t. \Pi sig* = 1.
+    // See the appendix of the 2014 PD paper for the derivation.
+    // Let D = sig* - sig.
+    // min \|D\|^2 s.t. \Pi (sig(i) + D(i)) = 1.
+
+    const PDScalar eps = std::numeric_limits<PDScalar>::epsilon();
+    // CheckError(sig.minCoeff() >= eps, "Singular F.");
+
+    // Initial guess.
+    Eigen::Matrix<PDScalar, 3, 1> D = sig / std::pow(sig.prod(), PDScalar(1) / 3) - sig;
+    const int max_iter = 50;
+    for (int i = 0; i < max_iter; ++i) {
+        // Compute C(D) = \Pi (sig_i + D_i) - 1.
+        const PDScalar C = (sig + D).prod() - 1;
+        // Compute grad C(D).
+        Eigen::Matrix<PDScalar, 3, 1> grad_C = Eigen::Matrix<PDScalar, 3, 1>::Ones();
+        for (int j = 0; j < 3; ++j) {
+            for (int k = 0; k < 3; ++k) {
+                if (j == k) continue;
+                grad_C(j) *= (sig(k) + D(k));
+            }
+        }
+        const Eigen::Matrix<PDScalar, 3, 1> D_next = (grad_C.dot(D) - C) / grad_C.squaredNorm() * grad_C;
+        const PDScalar diff = (D_next - D).cwiseAbs().maxCoeff();
+        if (diff <= eps) break;
+        // Update.
+        D = D_next;
+    }
+    return U * (sig + D).asDiagonal() * V.transpose();
+}
+
 PDScalar HRPDTetMesh::GetPDEnergy(PDPositions& positions, int tInd)
 {
     // positions - [4 x 3]
@@ -348,14 +469,15 @@ PDScalar HRPDTetMesh::GetStvkEnergy(PDPositions& positions, int tInd)
     // return 0.5 * (F.transpose() * F - Eigen::Matrix<PDScalar,3,3>::Identity()).norm();
 }
 
-void HRPDTetMesh::IGL_SetMesh(igl::opengl::glfw::Viewer* viewer)
+void HRPDTetMesh::IGL_SetMesh(igl::opengl::glfw::Viewer* viewer, Eigen::MatrixXd colorMapData)
 {
     // spdlog::info(">>> HRPDTetMesh::IGL_SetMesh()");
     // ==================== Compute color ====================
     {
         m_colors.resize(m_positions.rows(), 1);
         // [todo]
-        Eigen::MatrixXd disp_norms = (m_positions - m_restpose_positions).cast<double>().rowwise().norm();
+        // Eigen::MatrixXd disp_norms = (m_positions - m_restpose_positions).cast<double>().rowwise().norm();
+        Eigen::MatrixXd disp_norms = colorMapData;
         // spdlog::info(">>> DISP_NORMS - MIN = {}, MAX = {}", disp_norms.minCoeff(), disp_norms.maxCoeff());
         disp_norms = (disp_norms.array() >= PD_CUTOFF).select(disp_norms, 0);
         // spdlog::info(">>> DISP_NORMS - MIN = {}, MAX = {}", disp_norms.minCoeff(), disp_norms.maxCoeff());
