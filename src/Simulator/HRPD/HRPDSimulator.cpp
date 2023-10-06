@@ -8,13 +8,16 @@
 #include "Simulator/HRPD/HRPDSimulator.hpp"
 #include "Simulator/HRPD/HRPDSubspaceBuilder.hpp"
 #include "Simulator/PDTypeDef.hpp"
-#include "Simulator/HRPD/CUDA/CUDAMatrixOP.hpp"
 
 #include "UI/InteractState.hpp"
 #include "Util/Profiler.hpp"
 #include "Util/StoreData.hpp"
 #include "Util/Timer.hpp"
 #include "spdlog/spdlog.h"
+
+#ifdef PD_USE_CUDA
+#include "CUDA/CUDAMatrixOP.hpp"
+#endif
 
 extern UI::InteractState g_InteractState;
 extern Util::Profiler g_StepProfiler;
@@ -559,7 +562,7 @@ Eigen::MatrixXd HRPDSimulator::GetColorMapData()
         PD_PARALLEL_FOR
         for (int v = 0; v < m_mesh->m_positions.rows(); v++) {
             m_STVK_E(v, 0) = 0;
-            for (auto tp :m_mesh->m_tetsPerVertex[v]) {
+            for (auto tp : m_mesh->m_tetsPerVertex[v]) {
                 m_STVK_E(v, 0) += tetsE[tp.first];
             }
             m_STVK_E(v, 0) /= 4.0;

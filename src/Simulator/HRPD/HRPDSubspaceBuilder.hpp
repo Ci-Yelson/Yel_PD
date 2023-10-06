@@ -6,7 +6,7 @@
 #include <memory>
 
 #ifdef PD_USE_CUDA
-#include "Simulator/HRPD/CUDA/CUDAMatrixVectorMult.hpp"
+#include "CUDA/CUDAMatrixVectorMult.hpp"
 #endif
 
 #define USE_PCA false

@@ -2,7 +2,10 @@
 
 #include <igl/opengl/glfw/Viewer.h>
 #include <igl/opengl/glfw/ViewerPlugin.h>
+
 #include "Simulator/HRPD/HRPDSimulator.hpp"
+#include "Simulator/Newton/NewtonSimulator.hpp"
+
 #include "Simulator/PDSimulator.hpp"
 #include "igl/unproject_onto_mesh.h"
 #include "imgui.h"
@@ -51,10 +54,15 @@ public:
             auto tetMesh = std::make_shared<HRPDTetMesh>(g_InteractState.meshURL);
             m_sim = std::make_shared<HRPDSimulator>(tetMesh);
         }
-        else if (g_InteractState.simulatorType == "QNPD") {
+        if (g_InteractState.simulatorType == "QNPD") {
             spdlog::info("### USE QNPD SIMULATOR [TODO]");
             // auto tetMesh = std::make_shared<QNPDTetMesh>(g_InteractState.meshURL);
             // m_sim = std::make_shared<QNPDSimulator>(tetMesh);
+        }
+        if (g_InteractState.simulatorType == "Newton") {
+            spdlog::info("### USE Newton SIMULATOR [TODO]");
+            auto tetMesh = std::make_shared<CL::TetMesh>(g_InteractState.meshURL);
+            m_sim = std::make_shared<CL::NewtonSimulator>(tetMesh);
         }
     }
 

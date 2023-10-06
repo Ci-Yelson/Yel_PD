@@ -7,7 +7,9 @@
 #include "Viewer/PDViewer.hpp"
 #include "spdlog/spdlog.h"
 
-#include "Simulator/HRPD/CUDA/CUDAMatrixOP.hpp"
+#ifdef PD_USE_CUDA
+#include "CUDA/CUDAMatrixOP.hpp"
+#endif
 
 extern UI::InteractState g_InteractState;
 extern Util::Profiler g_FrameProfiler;
@@ -611,7 +613,7 @@ void SubspaceBuilder::InterpolateSubspaceToFullspaceForPos(PDPositions& posFull,
 {
     // x_{full} = U * x_{sub}
     if (usedVerticesOnly) {
-        {   // GPU updater is slower than CPU - Matrix size not big enough
+        { // GPU updater is slower than CPU - Matrix size not big enough
             PROFILE_STEP("INTERPOLATION_USED");
             PD_PARALLEL_FOR
             for (int d = 0; d < 3; d++) {

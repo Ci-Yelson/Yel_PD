@@ -129,12 +129,11 @@ HRPDTetMesh::HRPDTetMesh(std::string meshURL)
         int _N = m_positions.rows();
         int _Nt = m_tets.rows();
         // -- For position space
-        m_vertexMasses = PDVector(_N);
-        m_vertexMasses.setZero();
+        m_vertexMasses.setZero(m_positions.rows());
         auto& pos = m_positions;
         auto& tet = m_tets;
-        // PD_PARALLEL_FOR - will cause error because of `+=` operation
-        for (int tInd = 0; tInd < _Nt; tInd++) {
+        PD_PARALLEL_FOR
+        for (int tInd = 0; tInd < m_tets.rows(); tInd++) {
             Eigen::Matrix<PDScalar, 3, 3> edges;
             edges.col(0) = pos.row(tet(tInd, 1)) - pos.row(tet(tInd, 0));
             edges.col(1) = pos.row(tet(tInd, 2)) - pos.row(tet(tInd, 0));
@@ -142,10 +141,10 @@ HRPDTetMesh::HRPDTetMesh(std::string meshURL)
             double vol = std::abs(edges.determinant()) / 6.0;
             vol /= 4.0;
 
-            m_vertexMasses(tet(tInd, 0), 0) += vol;
-            m_vertexMasses(tet(tInd, 1), 0) += vol;
-            m_vertexMasses(tet(tInd, 2), 0) += vol;
-            m_vertexMasses(tet(tInd, 3), 0) += vol;
+            for (int k = 0; k < 4; k++) {
+                PD_PARALLEL_ATOMIC
+                m_vertexMasses(tet(tInd, k), 0) += vol;
+            }
         }
         PD_PARALLEL_FOR
         for (int vInd = 0; vInd < _N; vInd++) {

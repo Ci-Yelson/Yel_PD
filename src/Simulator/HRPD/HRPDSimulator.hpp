@@ -64,6 +64,7 @@ struct HRPDSimulator : public PDSimulator {
     PDPositions ms_s;
     PDPositions ms_prevPositionsSub;
 
+public:
     // ----------------- UI-Operation -----------------
     OperationManager m_OpManager;
     // For Color Map
@@ -93,13 +94,12 @@ struct HRPDSimulator : public PDSimulator {
 public:
     HRPDSimulator(std::shared_ptr<HRPDTetMesh> tetMesh);
 
-    void LoadParamsAndApply() override;
-
+    void ComputeWeightedExtForces();
     void PreCompute();
+
+    void LoadParamsAndApply() override;
     void Step() override;
     void Reset() override;
-
-    void ComputeWeightedExtForces();
 
     void UpdateStiffnessWeight();
     void UpdateTimeStep() override;

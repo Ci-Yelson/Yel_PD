@@ -51,7 +51,7 @@ int main(int argc, char** argv)
 
     g_Gizmo.init(&g_Viewer, nullptr);
     // g_Gizmo config
-    g_Gizmo.visible = false; // TODO
+    g_Gizmo.visible = false; // TODO [###]
     g_Gizmo.operation = ImGuizmo::TRANSLATE;
     g_Gizmo.callback = [&](const Eigen::Matrix4f& T) {
         ImGuiIO& io = ImGui::GetIO();

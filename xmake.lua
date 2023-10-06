@@ -4,6 +4,10 @@ add_requires("spdlog", "glfw", "glad", "glew", "glm", "nlohmann_json")
 add_requires("tetgen 1.6.0", {alias = "tetgen"})
 add_requires("libigl v2.4.0", {alias = "libigl", system = false, configs = {imgui = false}})
 
+add_requires("amgcl 1.4.3", {alias = "amgcl"}) -- deps on `boost`
+-- add_requires("boost")
+
+
 option("PD_USE_CUDA")
     set_default(true) -- 设置默认值为 true
     set_showmenu(true)
@@ -16,9 +20,13 @@ target("Yel_PD")
     set_languages("cxx17")
     add_defines("IGL_VIEWER_VIEWER_QUIET")
     -- add_defines("EIGEN_DONT_PARALLELIZE")
+    
+    add_defines("POLYSOLVE_WITH_AMGCL")
 
     set_options("PD_USE_CUDA")
 
+    add_rules("c++")
+    -- add_files("src/**.tpp") -- error: unknown source file: src\polysolve\LinearSolverEigen.tpp
     add_files(
         -- 递归添加src下的所有cpp文件
         "src/**.cpp", 
@@ -38,11 +46,15 @@ target("Yel_PD")
         "src", 
         "libs",
         "libs/imgui",
-        "libs/imguizmo"
+        "libs/imguizmo",
+        "libs/CppNumericalSolvers/include",
+        "libs/LBFGSpp/include"
     )
 
     add_packages("spdlog", "glfw", "glad", "glew", "glm", "nlohmann_json")
     add_packages("tetgen", "libigl")
+
+    add_packages("amgcl")
 
     -- For cuda
     if has_config("PD_USE_CUDA") then

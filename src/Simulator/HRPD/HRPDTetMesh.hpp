@@ -14,7 +14,7 @@
 #include "igl/opengl/glfw/Viewer.h"
 
 #ifdef PD_USE_CUDA
-#include "Simulator/HRPD/CUDA/CUDAMatrixVectorMult.hpp"
+#include "CUDA/CUDAMatrixVectorMult.hpp"
 #endif
 
 #define BASE_FUNC_CUTOFF 0.0001
@@ -40,13 +40,17 @@ struct HRPDTetMesh {
     PDVector m_vertexMasses;
     PDScalar m_normalizationMass;
 
-    // For TetStrain Constraint
+    // For Tet Constraint
     PDScalar m_minStrain;
     PDScalar m_maxStrain;
     PDScalar m_stiffness_weight;
     std::vector<PDScalar> m_normalization_weight;
     std::vector<Eigen::Triplet<PDScalar>> m_selectionMatrixTris;
     std::vector<PDMatrix> m_restEdgesInv;
+
+    // ---- For uniform show data
+    std::vector<std::vector<int>> m_adjVerts1rd, m_adjVerts2rd;
+    std::vector<std::vector<std::pair<unsigned int, unsigned int>>> m_tetsPerVertex;
 
 #ifdef PD_USE_CUDA
     CUDABufferMapping* m_GPUBufferMapper_V = nullptr;
@@ -56,10 +60,6 @@ struct HRPDTetMesh {
     CUDABufferMapping* m_GPUBufferMapper_V_diffuse_vbo = nullptr;
     CUDABufferMapping* m_GPUBufferMapper_V_specular_vbo = nullptr;
 #endif
-
-    // ---- For uniform show data
-    std::vector<std::vector<int>> m_adjVerts1rd, m_adjVerts2rd;
-    std::vector<std::vector<std::pair<unsigned int, unsigned int>>> m_tetsPerVertex;
 
 public:
     HRPDTetMesh(std::string meshURL);
