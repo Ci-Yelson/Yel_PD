@@ -79,20 +79,20 @@ public:
     void InitTetConstraints(PDScalar mu, PDScalar lambda);
 
     // TODO
-    void EvalEnergy();
-    void EvalGradient();
-    void EvalHessian(bool definitness_fix = true);
+    void EvalEnergy(Eigen::Matrix<PDScalar, -1, 3>& pos);
+    void EvalGradient(Eigen::Matrix<PDScalar, -1, 3>& pos);
+    void EvalHessian(Eigen::Matrix<PDScalar, -1, 3>& pos, bool definitness_fix = true);
 
 public:
     // Math utils
     void reduced_to_full(Eigen::Matrix<PDScalar, -1, 3>& reduced, Eigen::Matrix<PDScalar, -1, 1>& full);
     void full_to_reduced(Eigen::Matrix<PDScalar, -1, 3>& reduced, Eigen::Matrix<PDScalar, -1, 1>& full);
 
-    Eigen::Matrix<PDScalar, 3, 3> Get_deformation_gradient(int tInd);
-    PDScalar Get_element_energy(int tInd);
-    Eigen::Matrix<PDScalar, 9, 12> Get_vec_dF_dx(int tInd);
-    Eigen::Matrix<PDScalar, 9, 1> Get_vec_dPhi_dF(int tInd);
-    Eigen::Matrix<PDScalar, 9, 9> Get_vec_d2Phi_dF2(int tInd);
+    Eigen::Matrix<PDScalar, 3, 3> Get_deformation_gradient(int tInd, Eigen::Matrix<PDScalar, -1, 3>& pos);
+    PDScalar Get_element_energy(int tInd, Eigen::Matrix<PDScalar, -1, 3>& pos);
+    Eigen::Matrix<PDScalar, 9, 12> Get_vec_dF_dx(int tInd, Eigen::Matrix<PDScalar, -1, 3>& pos);
+    Eigen::Matrix<PDScalar, 9, 1> Get_vec_dPhi_dF(int tInd, Eigen::Matrix<PDScalar, -1, 3>& pos);
+    Eigen::Matrix<PDScalar, 9, 9> Get_vec_d2Phi_dF2(int tInd, Eigen::Matrix<PDScalar, -1, 3>& pos);
 
     /// Matrix Projection onto Positive Semi-Definite Cone
     template <typename _Scalar, int _Rows, int _Cols, int _Options, int _MaxRows, int _MaxCols>
@@ -103,6 +103,8 @@ public:
     {
         m_velocities.setZero();
         m_positions = m_restpose_positions;
+        m_velocities_vec.setZero();
+        reduced_to_full(m_positions, m_positions_vec);
 #ifdef PD_USE_CUDA
         for (int d = 0; d < 3; d++) {
             Eigen::Matrix<float, -1, 3, Eigen::RowMajor> V_vbo = m_positions.cast<float>();

@@ -7,9 +7,10 @@ add_requires("libigl v2.4.0", {alias = "libigl", system = false, configs = {imgu
 add_requires("amgcl 1.4.3", {alias = "amgcl"}) -- deps on `boost`
 -- add_requires("boost")
 
+add_requires("ghc_filesystem")
 
 option("PD_USE_CUDA")
-    set_default(true) -- 设置默认值为 true
+    -- set_default(true) -- 设置默认值为 true
     set_showmenu(true)
     set_description("The PD_USE_CUDA config option")
 option_end()

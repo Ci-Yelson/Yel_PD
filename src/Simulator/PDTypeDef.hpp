@@ -54,7 +54,7 @@ typedef Eigen::Matrix<PDScalar, -1, 3, 0, -1, 3> EigenMatrixx3;
 typedef Eigen::LDLT<PDMatrix> PDDenseSolver;
 typedef Eigen::LLT<PDMatrix> PDDenseLLTSolver;
 typedef Eigen::SimplicialLDLT<PDSparseMatrix> PDSparseSolver;
-typedef Eigen::SimplicialLLT<PDSparseMatrix> PDSparseLLTSolver;
+typedef Eigen::SimplicialLLT<PDSparseMatrix, Eigen::Upper> PDSparseLLTSolver;
 typedef Eigen::ConjugateGradient<PDSparseMatrix> PDSparseCGSolver;
 
 } // namespace PD

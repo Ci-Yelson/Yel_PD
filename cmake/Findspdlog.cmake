@@ -2,6 +2,8 @@ if(TARGET spdlog)
 	return()
 endif()
 
+message(STATUS "Third-party: creating target 'spdlog::spdlog'")
+
 include(FetchContent)
 FetchContent_Declare(
 	spdlog

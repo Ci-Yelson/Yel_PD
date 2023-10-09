@@ -1,0 +1,23 @@
+{
+    "meshURL": "models/longbar.obj",
+    "simulatorType": "QNPD",
+    "timeStep": 0.033,
+
+    "Camera Info": {
+        "//": "Constant at most cases",
+        "camera_center": [0, 0, 0],
+        "camera_translation": [0, 0, 0],
+        "camera_eye": [0, 0, 5],
+        "camera_up": [0, 1, 0],
+        "camera_view_angle": 45,
+        "camera_dnear": 1,
+        "camera_dfar": 100,
+
+        "//": "camera_base_zoom related to detail model",
+        "camera_base_zoom": 2.01042,
+        
+        "//": "Key params",
+        "camera_zoom": 1,
+        "trackball_angle": [0, 0, 0, 1] 
+    }
+}

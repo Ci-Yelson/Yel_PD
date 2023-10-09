@@ -126,7 +126,6 @@ private:
 
 public:
     // ----------------- API -----------------
-
     Eigen::MatrixXd GetColorMapData();
     void SetGravity(PDScalar gravityConstant);
     // void setFloor(PDScalar height, PDScalar floorCollisionWeight);

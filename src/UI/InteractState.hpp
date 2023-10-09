@@ -10,7 +10,6 @@ namespace UI {
 struct DraggingState {
     bool isDragging{ false };
     int vertex{ -1 };
-    int vertexUsed{ -1 };
     float forceStrength = 0.1;
     Eigen::RowVector3d prevMouse;
     Eigen::RowVector3d force;
@@ -37,6 +36,21 @@ struct InteractState {
 
     double dHat = 0.005;
 
+    // For Newton
+    struct NewtonParams {
+        double stifness_mu = 80;
+        double stifness_lambda = 20;
+
+        double gravityConstant = 1;
+
+        // Line search
+        bool ls_enable_line_search = true;
+        bool ls_enable_exact_search = false;
+        double ls_step_size = 1.0;
+        double ls_alpha = 0.03;
+        double ls_beta = 0.5;
+    } newtonParams;
+
     // For HRPD
     struct HRPDParams {
         int numberSamplesForVertexPosSubspace = 150; // [k]
@@ -56,7 +70,7 @@ struct InteractState {
 
     // For QNPD
     struct QNPDParams {
-        std::string materialType = "MATERIAL_TYPE_StVK";
+        std::string materialType = "MATERIAL_TYPE_NEOHOOKEAN_EXTEND_LOG";
         std::string solverType = "SOLVER_TYPE_DIRECT_LLT";
 
         std::string integration_method = "INTEGRATION_IMPLICIT_EULER";
@@ -69,7 +83,7 @@ struct InteractState {
         double stiffness_laplacian = 2 * stiffness_stretch + stiffness_bending;
         double damping_coefficient = 0.001;
 
-        double gravityConstant = 1;
+        double gravityConstant = 0.1;
 
         int lbfgs_m = 5;
 

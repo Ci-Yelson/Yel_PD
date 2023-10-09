@@ -8,7 +8,10 @@
 #include <igl/remove_duplicate_vertices.h>
 #include <spdlog/spdlog.h>
 
+#include "Simulator/PDTypeDef.hpp"
 #include "UI/InteractState.hpp"
+
+#include "igl/jet.h"
 
 extern UI::InteractState g_InteractState;
 
@@ -109,7 +112,7 @@ TetMesh::TetMesh(std::string meshURL)
         }
         m_positions = TV.cast<PDScalar>();
         m_triangles = TF.cast<PDIndex>();
-        spdlog::info("TetrahedralizeMesh successful! {} vertices, {} faces", m_positions.rows(), m_triangles.rows());
+        spdlog::info("TetrahedralizeMesh successful! {} vertices, {} faces, {} tets", m_positions.rows(), m_triangles.rows(), m_tets.rows());
     }
 
     m_restpose_positions = m_positions;
@@ -192,6 +195,7 @@ TetMesh::TetMesh(std::string meshURL)
 
 void TetMesh::InitTetConstraints(PDScalar mu, PDScalar lambda)
 {
+    spdlog::info(">>> TetMesh - TetMesh::InitTetConstraints()");
     m_mu = mu;
     m_lambda = lambda;
 
@@ -216,6 +220,7 @@ void TetMesh::InitTetConstraints(PDScalar mu, PDScalar lambda)
                 m_vertexMasses(tet(tInd, k), 0) += vol;
             }
         }
+        spdlog::info(">>> TetMesh - TetMesh::InitTetConstraints() - After Get vertex masses");
         PD_PARALLEL_FOR
         for (int vInd = 0; vInd < m_positions.rows(); vInd++) {
             m_vertexMasses(vInd, 0) = std::max(m_vertexMasses(vInd, 0), PDScalar(PD_MIN_MASS));
@@ -223,26 +228,32 @@ void TetMesh::InitTetConstraints(PDScalar mu, PDScalar lambda)
         double totalMass = m_vertexMasses.sum();
         // Normalize vertex masses to integrate to 1 for numerical reasons
         m_normalizationMass = 1.0 / totalMass;
+        spdlog::info("Normalize vertex mass: {}", m_normalizationMass);
         m_vertexMasses *= m_normalizationMass * g_InteractState.hrpdParams.massPerUnitArea;
 
         // -- Get mass matrix
         std::vector<PDSparseMatrixTriplet> massTris(m_system_dim);
         std::vector<PDSparseMatrixTriplet> massInvTris(m_system_dim);
+        spdlog::info("m_system_dim = {}, m_vertexMasses length = {}", m_system_dim, m_vertexMasses.rows());
         PD_PARALLEL_FOR
         for (int v = 0; v < m_system_dim; v++) {
-            massTris[v] = { v, v, m_vertexMasses(v / 3) };
-            massInvTris[v] = { v, v, 1.0 / m_vertexMasses(v / 3) };
+            massTris[v] = { v, v, m_vertexMasses(v / 3, 0) };
+            massInvTris[v] = { v, v, 1.0 / m_vertexMasses(v / 3, 0) };
         }
+        m_mass_matrix.resize(m_system_dim, m_system_dim);
+        m_mass_matrix_inv.resize(m_system_dim, m_system_dim);
         m_mass_matrix.setFromTriplets(massTris.begin(), massTris.end());
         m_mass_matrix_inv.setFromTriplets(massInvTris.begin(), massInvTris.end());
         m_mass_matrix.makeCompressed();
         m_mass_matrix_inv.makeCompressed();
+        spdlog::info(">>> TetMesh - TetMesh::InitTetConstraints() - After Mass [3N x 3N]");
     }
 
     m_DmInvs.resize(m_tets.rows());
     m_Ws.resize(m_tets.rows());
     reduced_to_full(m_positions, m_positions_vec);
     reduced_to_full(m_velocities, m_velocities_vec);
+    spdlog::info(">>> TetMesh - TetMesh::InitTetConstraints() - After vec");
 
     PD_PARALLEL_FOR
     for (int tInd = 0; tInd < m_tets.rows(); tInd++) {
@@ -259,26 +270,30 @@ void TetMesh::InitTetConstraints(PDScalar mu, PDScalar lambda)
         m_DmInvs[tInd] = edges.inverse();
         m_Ws[tInd] = 1.0 / 6.0 * std::abs(m_DmInvs[tInd].determinant());
     }
+
+    spdlog::info(">>> TetMesh - After TetMesh::InitTetConstraints()");
 }
 
-void TetMesh::EvalEnergy()
+void TetMesh::EvalEnergy(Eigen::Matrix<PDScalar, -1, 3>& pos)
 {
     m_E = 0;
     m_Es.resize(m_tets.rows());
     PD_PARALLEL_FOR
     for (int tInd = 0; tInd < m_tets.rows(); tInd++) {
-        m_Es(tInd) = Get_element_energy(tInd);
+        m_Es(tInd) = Get_element_energy(tInd, pos);
     }
     m_E = m_Es.sum();
+
+    // spdlog::info(">>> TetMesh - After TetMesh::EvalEnergy()");
 }
 
-void TetMesh::EvalGradient()
+void TetMesh::EvalGradient(Eigen::Matrix<PDScalar, -1, 3>& pos)
 {
     m_Grad.setZero(m_positions.rows() * 3);
     PD_PARALLEL_FOR
     for (int tInd = 0; tInd < m_tets.rows(); tInd++) {
-        Eigen::Matrix<PDScalar, 12, 9> vec_dF_dx = Get_vec_dF_dx(tInd);
-        Eigen::Matrix<PDScalar, 9, 1> vec_dPhi_dF = Get_vec_dPhi_dF(tInd);
+        Eigen::Matrix<PDScalar, 9, 12> vec_dF_dx = Get_vec_dF_dx(tInd, pos);
+        Eigen::Matrix<PDScalar, 9, 1> vec_dPhi_dF = Get_vec_dPhi_dF(tInd, pos);
         Eigen::Matrix<PDScalar, 12, 1> grad = vec_dF_dx.transpose() * vec_dPhi_dF;
 
         for (int i = 0; i < 12; i++) {
@@ -286,21 +301,30 @@ void TetMesh::EvalGradient()
             m_Grad(m_tets(tInd, i / 3) + i % 3) += grad(i);
         }
     }
+    spdlog::info(">>> TetMesh - After TetMesh::EvalGradient()");
 }
 
-void TetMesh::EvalHessian(bool definitness_fix)
+void TetMesh::EvalHessian(Eigen::Matrix<PDScalar, -1, 3>& pos, bool definitness_fix)
 {
-    std::vector<PDSparseMatrixTriplet> tris(m_positions.rows() * 3);
+    std::vector<PDSparseMatrixTriplet> tris(m_tets.rows() * 12 * 12);
     int tris_idx = 0;
 
     PD_PARALLEL_FOR
     for (int tInd = 0; tInd < m_tets.rows(); tInd++) {
-        Eigen::Matrix<PDScalar, 9, 12> vec_dF_dx = Get_vec_dF_dx(tInd);
-        Eigen::Matrix<PDScalar, 9, 9> vec_d2Phi_dF2 = Get_vec_d2Phi_dF2(tInd);
+        // spdlog::info(">>> TetMesh - TetMesh::EvalHessian() - tInd = {}", tInd);
+        Eigen::Matrix<PDScalar, 9, 12> vec_dF_dx = Get_vec_dF_dx(tInd, pos);
+        // spdlog::info(">>> TetMesh - TetMesh::EvalHessian() - tInd = {} vec_dF_dx ok.", tInd);
+        Eigen::Matrix<PDScalar, 9, 9> vec_d2Phi_dF2 = Get_vec_d2Phi_dF2(tInd, pos);
+        // spdlog::info(">>> TetMesh - TetMesh::EvalHessian() - tInd = {} vec_d2Phi_dF2 ok.", tInd);
         Eigen::Matrix<PDScalar, 12, 12> Hessian = vec_dF_dx.transpose() * vec_d2Phi_dF2 * vec_dF_dx;
+        // spdlog::info(">>> TetMesh - TetMesh::EvalHessian() - tInd = {} Hessian ok.", tInd);
 
         if (definitness_fix) { // Definitness fix
+            // std::cout << "=====================================\n";
+            // std::cout << Hessian << "\n";
+            // std::cout << "=====================================\n";
             Hessian = project_to_psd(Hessian);
+            // spdlog::info(">>> TetMesh - TetMesh::EvalHessian() - tInd = {} project_to_psd() ok.", tInd);
         }
 
         // Assemble
@@ -312,8 +336,11 @@ void TetMesh::EvalHessian(bool definitness_fix)
         }
     }
 
+    m_H.resize(m_positions.rows() * 3, m_positions.rows() * 3);
     m_H.setFromTriplets(tris.begin(), tris.end());
     m_H.makeCompressed();
+
+    spdlog::info(">>> TetMesh - After TetMesh::EvalHessian()");
 }
 
 // ===============================================================================
@@ -331,6 +358,7 @@ void TetMesh::reduced_to_full(Eigen::Matrix<PDScalar, -1, 3>& reduced, Eigen::Ma
 
 void TetMesh::full_to_reduced(Eigen::Matrix<PDScalar, -1, 3>& reduced, Eigen::Matrix<PDScalar, -1, 1>& full)
 {
+    reduced.resize(full.rows() / 3, 3);
     PD_PARALLEL_FOR
     for (int i = 0; i < reduced.rows(); i++) {
         reduced.row(i).x() = full(i * 3 + 0);
@@ -339,23 +367,23 @@ void TetMesh::full_to_reduced(Eigen::Matrix<PDScalar, -1, 3>& reduced, Eigen::Ma
     }
 }
 
-Eigen::Matrix<PDScalar, 3, 3> TetMesh::Get_deformation_gradient(int tInd)
+Eigen::Matrix<PDScalar, 3, 3> TetMesh::Get_deformation_gradient(int tInd, Eigen::Matrix<PDScalar, -1, 3>& pos)
 {
     Eigen::Matrix<PDScalar, 3, 3> F;
     int v0 = m_tets(tInd, 0);
     int v1 = m_tets(tInd, 1);
     int v2 = m_tets(tInd, 2);
     int v3 = m_tets(tInd, 3);
-    F.col(0) = m_positions.row(v1) - m_positions.row(v0);
-    F.col(1) = m_positions.row(v2) - m_positions.row(v0);
-    F.col(2) = m_positions.row(v3) - m_positions.row(v0);
+    F.col(0) = pos.row(v1) - pos.row(v0);
+    F.col(1) = pos.row(v2) - pos.row(v0);
+    F.col(2) = pos.row(v3) - pos.row(v0);
     F *= m_DmInvs[tInd];
     return F;
 }
 
-PDScalar TetMesh::Get_element_energy(int tInd)
+PDScalar TetMesh::Get_element_energy(int tInd, Eigen::Matrix<PDScalar, -1, 3>& pos)
 {
-    EigenMatrix3 F = Get_deformation_gradient(tInd);
+    EigenMatrix3 F = Get_deformation_gradient(tInd, pos);
 
     PDScalar e_this = 0;
     switch (m_material_type) {
@@ -421,7 +449,7 @@ PDScalar TetMesh::Get_element_energy(int tInd)
     return e_this;
 }
 
-Eigen::Matrix<PDScalar, 9, 12> TetMesh::Get_vec_dF_dx(int tInd)
+Eigen::Matrix<PDScalar, 9, 12> TetMesh::Get_vec_dF_dx(int tInd, Eigen::Matrix<PDScalar, -1, 3>& pos)
 {
     Eigen::Matrix<PDScalar, 9, 12> vec_dF_dx = Eigen::Matrix<PDScalar, 9, 12>::Zero();
     auto& DmInv = m_DmInvs[tInd];
@@ -449,10 +477,10 @@ Eigen::Matrix<PDScalar, 9, 12> TetMesh::Get_vec_dF_dx(int tInd)
     return vec_dF_dx;
 }
 
-Eigen::Matrix<PDScalar, 9, 1> TetMesh::Get_vec_dPhi_dF(int tInd)
+Eigen::Matrix<PDScalar, 9, 1> TetMesh::Get_vec_dPhi_dF(int tInd, Eigen::Matrix<PDScalar, -1, 3>& pos)
 {
     Eigen::Matrix<PDScalar, 9, 1> vec_dPhi_dF = Eigen::Matrix<PDScalar, 9, 1>::Zero();
-    Eigen::Matrix<PDScalar, 3, 3> F = Get_deformation_gradient(tInd);
+    Eigen::Matrix<PDScalar, 3, 3> F = Get_deformation_gradient(tInd, pos);
 
     if (m_material_type == MATERIAL_TYPE::MATERIAL_TYPE_NEOHOOKEAN) {
         PDScalar J = F.determinant();
@@ -482,10 +510,10 @@ Eigen::Matrix<PDScalar, 9, 1> TetMesh::Get_vec_dPhi_dF(int tInd)
     return vec_dPhi_dF;
 }
 
-Eigen::Matrix<PDScalar, 9, 9> TetMesh::Get_vec_d2Phi_dF2(int tInd)
+Eigen::Matrix<PDScalar, 9, 9> TetMesh::Get_vec_d2Phi_dF2(int tInd, Eigen::Matrix<PDScalar, -1, 3>& pos)
 {
     Eigen::Matrix<PDScalar, 9, 9> vec_d2Phi_dF2 = Eigen::Matrix<PDScalar, 9, 9>::Zero();
-    Eigen::Matrix<PDScalar, 3, 3> F = Get_deformation_gradient(tInd);
+    Eigen::Matrix<PDScalar, 3, 3> F = Get_deformation_gradient(tInd, pos);
 
     if (m_material_type == MATERIAL_TYPE::MATERIAL_TYPE_NEOHOOKEAN) {
         PDScalar J = F.determinant();
@@ -548,6 +576,8 @@ TetMesh::project_to_psd(const Eigen::Matrix<_Scalar, _Rows, _Cols, _Options, _Ma
     Eigen::SelfAdjointEigenSolver<Eigen::Matrix<_Scalar, _Rows, _Cols, _Options, _MaxRows, _MaxCols>> eigensolver(A);
     if (eigensolver.info() != Eigen::Success) {
         // logger().error("unable to project matrix onto positive semi-definite cone"); // singleton for multithread
+        std::cout << "????????????????????????????\n";
+        std::cout << A << "\n";
         spdlog::error("unable to project matrix onto positive semi-definite cone");
         throw std::runtime_error("unable to project matrix onto positive definite cone");
     }
@@ -567,6 +597,165 @@ TetMesh::project_to_psd(const Eigen::Matrix<_Scalar, _Rows, _Cols, _Options, _Ma
         }
     }
     return eigensolver.eigenvectors() * D * eigensolver.eigenvectors().transpose();
+}
+
+// Copy From `void HRPDTetMesh::IGL_SetMesh(igl::opengl::glfw::Viewer* viewer, Eigen::MatrixXd colorMapData)`
+void TetMesh::IGL_SetMesh(igl::opengl::glfw::Viewer* viewer, Eigen::MatrixXd colorMapData)
+{
+    // spdlog::info(">>> TetMesh::IGL_SetMesh()");
+    // ==================== Compute color ====================
+    {
+        m_colors.resize(m_positions.rows(), 1);
+        // [todo]
+        // Eigen::MatrixXd disp_norms = (m_positions - m_restpose_positions).cast<double>().rowwise().norm();
+        Eigen::MatrixXd disp_norms = colorMapData;
+        // spdlog::info(">>> DISP_NORMS - MIN = {}, MAX = {}", disp_norms.minCoeff(), disp_norms.maxCoeff());
+        disp_norms = (disp_norms.array() >= PD_CUTOFF).select(disp_norms, 0);
+        // spdlog::info(">>> DISP_NORMS - MIN = {}, MAX = {}", disp_norms.minCoeff(), disp_norms.maxCoeff());
+        disp_norms /= disp_norms.maxCoeff();
+        igl::jet(disp_norms, false, m_colors);
+        // spdlog::info(">>> M_COLORS Size = ({}, {})", m_colors.rows(), m_colors.cols());
+        // spdlog::info(">>> M_COLORS - MAX = {}", m_colors.maxCoeff());
+    }
+
+    // ==================== Set mesh data ====================
+#ifdef PD_USE_CUDA
+    if (m_meshID == -1) {
+        m_meshID = viewer->append_mesh(true);
+        auto& meshData = viewer->data(viewer->mesh_index(m_meshID));
+        meshData.clear();
+        meshData.point_size = 1.0f;
+        meshData.set_mesh(m_positions.cast<double>(), m_triangles);
+        meshData.set_colors(m_colors.cast<double>());
+
+        spdlog::info(">>> TetMesh::IGL_SetMesh() - data.face_based = {}", meshData.face_based);
+
+        auto& _data = meshData;
+        _data.updateGL(_data, _data.invert_normals, _data.meshgl);
+        _data.dirty = 0;
+        _data.meshgl.bind_mesh();
+
+        spdlog::info(">>> TetMesh::IGL_SetMesh() - F.rows() = {}, m_colors.rows() = {}", meshData.F.rows(), m_colors.rows());
+
+        spdlog::info(">>> TetMesh::IGL_SetMesh() - meshgl.vbo_V = {}", meshData.meshgl.vbo_V);
+        spdlog::info(">>> TetMesh::IGL_SetMesh() - meshgl.vbo_V_uv = {}", meshData.meshgl.vbo_V_uv);
+        spdlog::info(">>> TetMesh::IGL_SetMesh() - meshgl.vbo_V_normals = {}", meshData.meshgl.vbo_V_normals);
+        spdlog::info(">>> TetMesh::IGL_SetMesh() - meshgl.vbo_V_ambient = {}", meshData.meshgl.vbo_V_ambient);
+        spdlog::info(">>> TetMesh::IGL_SetMesh() - meshgl.vbo_V_diffuse = {}", meshData.meshgl.vbo_V_diffuse);
+        spdlog::info(">>> TetMesh::IGL_SetMesh() - meshgl.vbo_V_specular = {}", meshData.meshgl.vbo_V_specular);
+
+        if (m_GPUBufferMapper_V) delete m_GPUBufferMapper_V;
+        m_GPUBufferMapper_V = new CUDABufferMapping();
+        m_GPUBufferMapper_V->initBufferMap(m_positions.size() * sizeof(float), meshData.meshgl.vbo_V);
+
+        /*if (meshData.meshgl.V_uv_vbo.size() > 0) {
+            if (m_GPUBufferMapper_V_uv) delete m_GPUBufferMapper_V_uv;
+            m_GPUBufferMapper_V_uv = new CUDABufferMapping();
+            m_GPUBufferMapper_V_uv->initBufferMap(meshData.meshgl.V_uv_vbo.size() * sizeof(float), meshData.meshgl.vbo_V_uv);
+        }*/
+
+        auto& data = meshData;
+        auto& meshgl = meshData.meshgl;
+
+        if (m_GPUBufferMapper_V_normals) delete m_GPUBufferMapper_V_normals;
+        m_GPUBufferMapper_V_normals = new CUDABufferMapping();
+        m_GPUBufferMapper_V_normals->initBufferMap(meshgl.V_normals_vbo.size() * sizeof(float), meshgl.vbo_V_normals);
+
+        if (m_GPUBufferMapper_V_ambient_vbo) delete m_GPUBufferMapper_V_ambient_vbo;
+        m_GPUBufferMapper_V_ambient_vbo = new CUDABufferMapping();
+        m_GPUBufferMapper_V_ambient_vbo->initBufferMap(meshgl.V_ambient_vbo.size() * sizeof(float), meshgl.vbo_V_ambient);
+
+        if (m_GPUBufferMapper_V_diffuse_vbo) delete m_GPUBufferMapper_V_diffuse_vbo;
+        m_GPUBufferMapper_V_diffuse_vbo = new CUDABufferMapping();
+        m_GPUBufferMapper_V_diffuse_vbo->initBufferMap(meshgl.V_diffuse_vbo.size() * sizeof(float), meshgl.vbo_V_diffuse);
+
+        if (m_GPUBufferMapper_V_specular_vbo) delete m_GPUBufferMapper_V_specular_vbo;
+        m_GPUBufferMapper_V_specular_vbo = new CUDABufferMapping();
+        m_GPUBufferMapper_V_specular_vbo->initBufferMap(meshgl.V_specular_vbo.size() * sizeof(float), meshgl.vbo_V_specular);
+
+        g_InteractState.isBufferMapping = true;
+    }
+    if (g_InteractState.isBufferMapping) {
+        auto& data = viewer->data(viewer->mesh_index(m_meshID));
+        auto& meshgl = data.meshgl;
+
+        { // Position update
+            // data.set_mesh(m_positions.cast<double>(), m_triangles);
+            meshgl.V_vbo = m_positions.cast<float>();
+            m_GPUBufferMapper_V->bufferMap(meshgl.V_vbo.data(), meshgl.V_vbo.size());
+            // meshgl.V_normals_vbo = data.V_normals.cast<float>();
+            // m_GPUBufferMapper_V_normals->bufferMap(meshgl.V_normals_vbo.data(), meshgl.V_normals_vbo.size());
+        }
+
+        {
+            // UV -- not used
+            // m_GPUBufferMapper_V_uv->bufferMap(V_uv_vbo.data(), V_uv_vbo.size());
+        }
+
+        { // Colors update
+            // meshData.set_colors(m_colors.cast<double>());
+            // using MatrixXd = Eigen::MatrixXd;
+            // // Ambient color should be darker color
+            // const auto ambient = [](const MatrixXd& C) -> MatrixXd {
+            //     MatrixXd T = 0.1 * C;
+            //     T.col(3) = C.col(3);
+            //     return T;
+            // };
+            // // Specular color should be a less saturated and darker color: dampened
+            // // highlights
+            // const auto specular = [](const MatrixXd& C) -> MatrixXd {
+            //     const double grey = 0.3;
+            //     MatrixXd T = grey + 0.1 * (C.array() - grey);
+            //     T.col(3) = C.col(3);
+            //     return T;
+            // };
+            // for (unsigned i = 0; i < data.V_material_diffuse.rows(); ++i) {
+            //     // m_colors.cols() == 3
+            //     data.V_material_diffuse.row(i) << m_colors.row(i), 1;
+            // }
+            // data.V_material_ambient = ambient(data.V_material_diffuse);
+            // data.V_material_specular = specular(data.V_material_diffuse);
+            // // Per-vertex material settings
+            // meshgl.V_ambient_vbo = data.V_material_ambient.cast<float>();
+            // meshgl.V_diffuse_vbo = data.V_material_diffuse.cast<float>();
+            // meshgl.V_specular_vbo = data.V_material_specular.cast<float>();
+
+            // [177K case] SET_COLORS: 0.0047059 s - TODO: Use cuda kernel to update?
+            // TICKC(SET_COLORS);
+            PD_PARALLEL_FOR
+            for (size_t i = 0; i < meshgl.V_diffuse_vbo.rows(); i++) {
+                Eigen::RowVector3f rC = m_colors.row(i).cast<float>();
+                meshgl.V_diffuse_vbo.row(i) << rC, 1;
+                meshgl.V_ambient_vbo.row(i) << (0.1 * rC), 1;
+                meshgl.V_specular_vbo.row(i) << (0.3 + 0.1 * (rC.array() - 0.3)), 1;
+            }
+
+            m_GPUBufferMapper_V_ambient_vbo->bufferMap(meshgl.V_ambient_vbo.data(), meshgl.V_ambient_vbo.size());
+            m_GPUBufferMapper_V_diffuse_vbo->bufferMap(meshgl.V_diffuse_vbo.data(), meshgl.V_diffuse_vbo.size());
+            m_GPUBufferMapper_V_specular_vbo->bufferMap(meshgl.V_specular_vbo.data(), meshgl.V_specular_vbo.size());
+
+            // TOCKC(SET_COLORS);
+        }
+
+        //  data.dirty = igl::opengl::MeshGL::DIRTY_DIFFUSE | igl::opengl::MeshGL::DIRTY_SPECULAR | igl::opengl::MeshGL::DIRTY_AMBIENT;
+        data.dirty = 0;
+    }
+    else {
+        auto& data = viewer->data(viewer->mesh_index(m_meshID));
+        data.set_mesh(m_positions.cast<double>(), m_triangles);
+        data.set_colors(m_colors.cast<double>());
+    }
+#else
+    if (m_meshID == -1) {
+        m_meshID = viewer->append_mesh(true);
+        viewer->data(viewer->mesh_index(m_meshID)).clear(); // clear is expensive for large models ?
+        viewer->data(viewer->mesh_index(m_meshID)).point_size = 1.0f;
+    }
+    auto& meshData = viewer->data(viewer->mesh_index(m_meshID));
+    meshData.set_mesh(m_positions.cast<double>(), m_triangles);
+    meshData.set_colors(m_colors.cast<double>());
+#endif
+    // spdlog::info(">>> TetMesh::IGL_SetMesh() - After");
 }
 
 }

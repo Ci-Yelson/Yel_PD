@@ -1,0 +1,20 @@
+{
+    "meshURL": "models/turtle-volumetric.obj",
+    "simulatorType": "Newton",
+    
+    "timeStep": 0.033,
+    "isHyperReduced": false,
+    "isMultiThreads": true,
+    "interpolationFrameSize": 12,
+    "wi": 0.0051,
+    "sigmaMin": 1.00,
+    "sigmaMax": 1.00,
+    "massPerUnitArea": 2,
+    "gravityConstant": 0.00007,
+    "numIterations": 10,
+    "numberSamplesForVertexPosSubspace": 150,
+    "radiusMultiplierForPosSubspace": 1.1,
+    "numberSamplesForVertexProjSubspace": 120,
+    "radiusMultiplierForProjSubspace": 2.2,
+    "numberSampledConstraints": 1000
+}

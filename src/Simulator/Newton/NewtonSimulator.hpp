@@ -16,15 +16,23 @@ struct NewtonSimulator : public PDSimulator {
     // ----------------- Config -----------------
     // TODO: USE GLOBAL dt ?
     PDScalar m_dt{ 16 }, m_dt2{ 16 * 16 }, m_dt2inv{ 1.0f / (16 * 16) };
-    void UpdateTimeStep() override;
+    void UpdateTimeStep() override
+    {
+        // TODO
+    }
 
-    // Simulation data
+public: // Simulation data
+    PDVector m_x, m_s;
+
     // -- For f_{ext}
-    PDPositions m_fExt;
+    PDVector m_fExt_vec;
     void EvalFext();
 
-public:
-    struct LineSearchConfig { // line search
+    PDScalar m_objE;
+    void EvalObjEnergy();
+
+public: // line search
+    struct LineSearchConfig {
         bool enable_line_search;
         bool enable_exact_search;
         PDScalar alpha, beta;
@@ -42,7 +50,10 @@ public:
 public:
     NewtonSimulator(std::shared_ptr<TetMesh> tetMesh);
 
-    Eigen::MatrixXd GetColorMapData(); //todo
+    Eigen::MatrixXd GetColorMapData()
+    { // TODO
+        return Eigen::MatrixXd(1, 1);
+    }
 
     void PreCompute();
     void LoadParamsAndApply() override;

@@ -44,7 +44,7 @@ list(PREPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
 find_package(libigl REQUIRED)
 igl_include(glfw)
 igl_include(copyleft tetgen)
-target_link_libraries(${PROJECT_NAME} PUBLIC igl::glfw igl_copyleft::tetgen)
+target_link_libraries(${PROJECT_NAME} PUBLIC igl::glfw igl_copyleft::tetgen igl::png)
 target_compile_definitions(${PROJECT_NAME} PUBLIC IGL_VIEWER_VIEWER_QUIET)
 # Add libs/ : imgui_docking, imguizmo
 target_include_directories(${PROJECT_NAME} PUBLIC ${PROJECT_SOURCE_DIR}/libs)
@@ -70,6 +70,14 @@ target_link_libraries(${PROJECT_NAME} PUBLIC spdlog::spdlog_header_only)
 # json
 find_package(nlohmann_json REQUIRED)
 target_link_libraries(${PROJECT_NAME} PUBLIC nlohmann_json::nlohmann_json)
+
+# ghs filesystem
+find_package(filesystem REQUIRED)
+target_link_libraries(${PROJECT_NAME} PUBLIC ghc::filesystem)
+
+# mshio
+find_package(mshio REQUIRED)
+target_link_libraries(${PROJECT_NAME} PUBLIC mshio::mshio)
 
 # CUDA
 if (PD_USE_CUDA)

@@ -49,24 +49,26 @@ int main(int argc, char** argv)
 
     g_Viewer.launch_init(true, false, "PD Viewer");
 
-    g_Gizmo.init(&g_Viewer, nullptr);
-    // g_Gizmo config
-    g_Gizmo.visible = false; // TODO [###]
-    g_Gizmo.operation = ImGuizmo::TRANSLATE;
-    g_Gizmo.callback = [&](const Eigen::Matrix4f& T) {
-        ImGuiIO& io = ImGui::GetIO();
-        // ImGuizmo::SetRect(0, 0, io.DisplaySize.x, io.DisplaySize.y);
-        spdlog::info(">>> ImGui::GetIO() - DisplaySize = ({}, {})", io.DisplaySize.x, io.DisplaySize.y);
-        auto HRPD_sim = dynamic_cast<PD::HRPDSimulator*>(viewerPlugin->m_sim.get());
-        if (!HRPD_sim || HRPD_sim->m_OpManager.m_selectObjectIndex == -1)
-            return;
-        auto& obj = HRPD_sim->m_OpManager.m_operationObjects[HRPD_sim->m_OpManager.m_selectObjectIndex];
-        auto& T0 = obj->m_gizmoT.cast<double>();
-        const Eigen::Matrix4d TT = (T.cast<double>() * T0.inverse()).transpose();
-        obj->ApplyTransform(TT, g_Gizmo.T);
-        g_Viewer.data(obj->m_meshID).set_vertices(obj->m_verts);
-        g_Viewer.data(obj->m_meshID).compute_normals();
-    };
+    {
+        g_Gizmo.init(&g_Viewer, nullptr);
+        // g_Gizmo config
+        g_Gizmo.visible = false; // TODO [###]
+        g_Gizmo.operation = ImGuizmo::TRANSLATE;
+        g_Gizmo.callback = [&](const Eigen::Matrix4f& T) {
+            ImGuiIO& io = ImGui::GetIO();
+            // ImGuizmo::SetRect(0, 0, io.DisplaySize.x, io.DisplaySize.y);
+            spdlog::info(">>> ImGui::GetIO() - DisplaySize = ({}, {})", io.DisplaySize.x, io.DisplaySize.y);
+            auto HRPD_sim = dynamic_cast<PD::HRPDSimulator*>(viewerPlugin->m_sim.get());
+            if (!HRPD_sim || HRPD_sim->m_OpManager.m_selectObjectIndex == -1)
+                return;
+            auto& obj = HRPD_sim->m_OpManager.m_operationObjects[HRPD_sim->m_OpManager.m_selectObjectIndex];
+            auto& T0 = obj->m_gizmoT.cast<double>();
+            const Eigen::Matrix4d TT = (T.cast<double>() * T0.inverse()).transpose();
+            obj->ApplyTransform(TT, g_Gizmo.T);
+            g_Viewer.data(obj->m_meshID).set_vertices(obj->m_verts);
+            g_Viewer.data(obj->m_meshID).compute_normals();
+        };
+    }
 
     viewerPlugin->Setup();
     g_Viewer.core().align_camera_center(viewerPlugin->m_sim->GetPositions().cast<double>(), viewerPlugin->m_sim->GetTriangles().cast<int>());

@@ -364,22 +364,23 @@ void HRPDSimulator::handleGripAndCollisionsUsedVs(PDPositions& s, bool update)
                 m_mesh->m_positions.row(g_InteractState.draggingState.vertex) += g_InteractState.draggingState.force.cast<PDScalar>();
             }
             else { // Update subspace used vertex
-                if (g_InteractState.draggingState.vertexUsed == -1) {
+                int vertexUsed = -1;
+                {
                     for (int i = 0; i < sub.m_positionsUsedVs.rows(); i++) {
-                        if (g_InteractState.draggingState.vertexUsed == -1) {
-                            g_InteractState.draggingState.vertexUsed = i;
+                        if (vertexUsed == -1) {
+                            vertexUsed = i;
                             continue;
                         }
                         auto x = GetPositions().row(g_InteractState.draggingState.vertex);
-                        auto prev = sub.m_positionsUsedVs.row(g_InteractState.draggingState.vertexUsed);
+                        auto prev = sub.m_positionsUsedVs.row(vertexUsed);
                         auto curr = sub.m_positionsUsedVs.row(i);
                         if ((x - prev).norm() > (x - curr).norm()) {
-                            g_InteractState.draggingState.vertexUsed = i;
+                            vertexUsed = i;
                         }
                     }
                 }
 
-                int vs = g_InteractState.draggingState.vertexUsed;
+                int vs = vertexUsed;
                 // double dt2 = g_InteractState.timeStep * g_InteractState.timeStep;
                 // m_positionsUsedVs.row(v) += (1.0 / dt2) * g_InteractState.draggingState.force.cast<PDScalar>();
                 sub.m_positionsUsedVs.row(vs) += g_InteractState.draggingState.force.cast<PDScalar>();

@@ -2,6 +2,8 @@
 
 #include "Simulator/PDTypeDef.hpp"
 #include "Simulator/HRPD/HRPDSimulator.hpp"
+#include "Simulator/QNPD/QNPDSimulator.hpp"
+#include "Simulator/QNPD/QNPDTetMesh.hpp"
 #include "UI/InteractState.hpp"
 #include "Util/Profiler.hpp"
 #include "Util/Timer.hpp"
@@ -9,6 +11,7 @@
 #include "igl/jet.h"
 #include "igl/unproject_onto_mesh.h"
 #include <igl/opengl/glfw/imgui/ImGuizmoWidget.h>
+#include "igl/png/writePNG.h"
 
 #include "imgui/imgui.h"
 #include "imgui/imgui_internal.h"
@@ -23,48 +26,43 @@ extern igl::opengl::glfw::imgui::ImGuizmoWidget g_Gizmo;
 
 namespace PD {
 
-void PDViewer::Setup()
+PDViewer::PDViewer()
 {
-    // Config floor mesh for draw
-    spdlog::info("> PDViewer::setup - Before");
-    {
-        if (m_floorMeshID == -1) {
-            spdlog::info("> PDViewer::setup - m_floorMeshID = {}", m_floorMeshID);
-            m_floorMeshID = viewer->append_mesh(g_InteractState.isFloorActive);
-            spdlog::info("> PDViewer::setup - m_floorMeshID = {}", m_floorMeshID);
-        }
-        double gridSize = m_floorGridSize;
-        double step = gridSize / 25;
-        Eigen::RowVector3d C;
-        for (double f = -gridSize; f <= gridSize; f += step) {
-            double y = 0.;
-            Eigen::RowVector3d p1 = { f, y, -gridSize };
-            Eigen::RowVector3d p2 = { f, y, gridSize };
-            Eigen::RowVector3d p3 = { -gridSize, y, f };
-            Eigen::RowVector3d p4 = { gridSize, y, f };
-            if (std::abs(f) < 1e-12)
-                C = { 0.0, 0.0, 0.0 };
-            else
-                C = { 0.8, 0.8, 0.8 };
-            viewer->data(m_floorMeshID).add_edges(p1, p2, C);
-            viewer->data(m_floorMeshID).add_edges(p3, p4, C);
-        }
+    if (g_InteractState.simulatorType == "HRPD") {
+        spdlog::info("### USE HRPD SIMULATOR");
+        auto tetMesh = std::make_shared<HRPDTetMesh>(g_InteractState.meshURL);
+        m_sim = std::make_shared<HRPDSimulator>(tetMesh);
     }
-    {
-        if (m_interactMeshID == -1) {
-            m_interactMeshID = viewer->append_mesh(true);
-            spdlog::info("> PDViewer::setup - m_interactMeshID = {}", m_interactMeshID);
-        }
+    if (g_InteractState.simulatorType == "QNPD") {
+        spdlog::info("### USE QNPD SIMULATOR [TODO]");
+        auto tetMesh = std::make_shared<QNPDTetMesh>(g_InteractState.meshURL);
+        m_sim = std::make_shared<QNPDSimulator>(tetMesh);
     }
-
-    spdlog::info("> PDViewer::setup - After");
+    if (g_InteractState.simulatorType == "Newton") {
+        spdlog::info("### USE Newton SIMULATOR [TODO]");
+        auto tetMesh = std::make_shared<CL::TetMesh>(g_InteractState.meshURL);
+        m_sim = std::make_shared<CL::NewtonSimulator>(tetMesh);
+    }
+    if (!m_sim) {
+        spdlog::error("### SIMULATOR CREATE ERROR");
+    }
 }
 
-void PDViewer::Reset()
+void PDViewer::init(igl::opengl::glfw::Viewer* _viewer)
 {
-    viewer->core().is_animating = false;
+    viewer = _viewer;
 
-    m_sim->Reset();
+    m_imguiContext = std::make_unique<ImGuiContext>();
+    m_imguiContext->init(viewer->window);
+
+    m_frameBuffer = std::make_unique<OpenGLFrameBuffer>();
+    {
+        // glfwGetWindowSize(viewer->window, &m_sceneWindowSize.first, &m_sceneWindowSize.second);
+        // spdlog::info(">>> Window m_sceneWindowSize = ({}, {})", m_sceneWindowSize.first, m_sceneWindowSize.second);
+        // viewer->core().viewport = { 0, 0, m_sceneWindowSize.first * 1.0f, m_sceneWindowSize.second * 1.0f };
+        // spdlog::info(">>> viewer->core().viewport = ({}, {}, {}, {})", viewer->core().viewport(0), viewer->core().viewport(1), viewer->core().viewport(2), viewer->core().viewport(3));
+        // m_frameBuffer->create_buffers(m_sceneWindowSize.first, m_sceneWindowSize.second);
+    }
 }
 
 bool PDViewer::pre_draw()
@@ -141,7 +139,7 @@ bool PDViewer::pre_draw()
             if (textureID) {
                 ImGui::Image((void*)(intptr_t)(textureID), ImVec2{ viewportPanelSize.x, viewportPanelSize.y }, ImVec2{ 0, 1 }, ImVec2{ 1, 0 });
             }
-            isSceneInterationActive = ImGui::IsItemHovered();
+            isSceneInteractionActive = ImGui::IsItemHovered();
             ImGui::End();
             if (_DB) spdlog::info(">>> PDViewer::Frame - After ImGui::Image()");
         }
@@ -166,14 +164,79 @@ bool PDViewer::pre_draw()
         if (_DB) spdlog::info(">>> PDViewer::Frame - After post draw");
     }
 
+    { // Camera test
+        std::cout << "=================================================\n";
+        std::cout << "Camera Info:\n";
+        std::cout << "  camera_center: " << viewer->core().camera_center.transpose() << "\n";
+        std::cout << "  camera_translation: " << viewer->core().camera_translation.transpose() << "\n";
+        std::cout << "  camera_eye: " << viewer->core().camera_eye.transpose() << "\n";
+        std::cout << "  camera_up: " << viewer->core().camera_up.transpose() << "\n";
+        std::cout << "  camera_view_angle: " << viewer->core().camera_view_angle << "\n";
+        std::cout << "  camera_base_zoom: " << viewer->core().camera_base_zoom << "\n";
+        std::cout << "  camera_zoom: " << viewer->core().camera_zoom << "\n";
+        std::cout << "  camera_dnear: " << viewer->core().camera_dnear << "\n";
+        std::cout << "  camera_dfar: " << viewer->core().camera_dfar << "\n";
+        std::cout << "  trackball_angle: " << viewer->core().trackball_angle << "\n";
+        std::cout << "=================================================\n";
+    }
+
     m_frameTimer.stopStopWatch();
     return true;
 }
 
+void PDViewer::Setup()
+{
+    // -- After g_Viewer.launch_init() - assert(viewer!=null);
+    // Config floor mesh for draw
+    spdlog::info("> PDViewer::setup - Before");
+    {
+        if (m_floorMeshID == -1) {
+            spdlog::info("> PDViewer::setup - m_floorMeshID = {}", m_floorMeshID);
+            m_floorMeshID = viewer->append_mesh(g_InteractState.isFloorActive);
+            spdlog::info("> PDViewer::setup - m_floorMeshID = {}", m_floorMeshID);
+        }
+        double gridSize = m_floorGridSize;
+        double step = gridSize / 25;
+        Eigen::RowVector3d C;
+        for (double f = -gridSize; f <= gridSize; f += step) {
+            double y = 0.;
+            Eigen::RowVector3d p1 = { f, y, -gridSize };
+            Eigen::RowVector3d p2 = { f, y, gridSize };
+            Eigen::RowVector3d p3 = { -gridSize, y, f };
+            Eigen::RowVector3d p4 = { gridSize, y, f };
+            if (std::abs(f) < 1e-12)
+                C = { 0.0, 0.0, 0.0 };
+            else
+                C = { 0.8, 0.8, 0.8 };
+            viewer->data(m_floorMeshID).add_edges(p1, p2, C);
+            viewer->data(m_floorMeshID).add_edges(p3, p4, C);
+        }
+    }
+    {
+        if (m_interactMeshID == -1) {
+            m_interactMeshID = viewer->append_mesh(true);
+            spdlog::info("> PDViewer::setup - m_interactMeshID = {}", m_interactMeshID);
+        }
+    }
+
+    spdlog::info("> PDViewer::setup - After");
+}
+
+void PDViewer::Reset()
+{
+    viewer->core().is_animating = false;
+
+    m_sim->Reset();
+}
+
+// ====================================================================================================
+// ---------------- User Interaction ----------------
+// ====================================================================================================
+
 bool PDViewer::mouse_down(int button, int modifier)
 {
     if (g_Gizmo.visible && ImGuizmo::IsOver()) return true;
-    if (!isSceneInterationActive) return true;
+    if (!isSceneInteractionActive) return true;
     if (modifier != GLFW_MOD_CONTROL) return false;
     float x = viewer->current_mouse_x - (m_sceneWindowPos.x - m_imguiContext->root_window_pos.x + m_sceneCursorPos.x);
     float y = viewer->core().viewport(3) - (viewer->current_mouse_y - (m_sceneWindowPos.y - m_imguiContext->root_window_pos.y + m_sceneCursorPos.y));
@@ -200,7 +263,7 @@ bool PDViewer::mouse_down(int button, int modifier)
 bool PDViewer::mouse_move(int button, int modifier)
 {
     if (g_Gizmo.visible && ImGuizmo::IsOver()) return true;
-    if (!isSceneInterationActive) return true;
+    if (!isSceneInteractionActive) return true;
     if (!g_InteractState.draggingState.isDragging) return false;
     auto curr_mouse = Eigen::RowVector3d(
         viewer->current_mouse_x - (m_sceneWindowPos.x - m_imguiContext->root_window_pos.x + m_sceneCursorPos.x),
@@ -223,14 +286,15 @@ bool PDViewer::mouse_move(int button, int modifier)
 
 bool PDViewer::mouse_up(int button, int modifier)
 {
-    if (!isSceneInterationActive) return true;
+    if (!isSceneInteractionActive) return true;
     g_InteractState.draggingState.isDragging = false;
     g_InteractState.draggingState.vertex = -1;
-    g_InteractState.draggingState.vertexUsed = -1;
     return false;
 }
 
-// ------------------------------- Windows -------------------------------
+// ====================================================================================================
+// ---------------- Windows ----------------
+// ====================================================================================================
 void PDViewer::SimulatorInfoWindow()
 {
     ImGui::Begin("SimulatorInfo");
@@ -312,7 +376,7 @@ void PDViewer::SimulatorInfoWindow()
         auto hrpd = dynamic_cast<HRPDSimulator*>(m_sim.get());
         if (hrpd) {
             if (ImGui::CollapsingHeader("ColorMap", ImGuiTreeNodeFlags_DefaultOpen)) {
-                for (int i =0; i < hrpd->ColorMapTypeStrs.size(); i++) {
+                for (int i = 0; i < hrpd->ColorMapTypeStrs.size(); i++) {
                     auto& str = hrpd->ColorMapTypeStrs[i];
                     if (hrpd->ColorMapTypeActive[str]) {
                         ImGui::RadioButton(str.c_str(), &hrpd->m_colorMapType, i);
@@ -680,6 +744,35 @@ void PDViewer::ProfilerWindow()
     if (viewer->core().is_animating == true) {
         g_StepProfiler.laterClearRootSection();
     }
+}
+
+// ====================================================================================================
+// ---------------- Utils ----------------
+// ====================================================================================================
+void PDViewer::ExportToPNG(std::string export_url)
+{
+    bool offlineMode = false;
+    if (offlineMode) return;
+
+    double scale = 1;
+    viewer->data().point_size *= scale;
+
+    int width = static_cast<int>(scale * (viewer->core().viewport[2] - viewer->core().viewport[0]));
+    int height = static_cast<int>(scale * (viewer->core().viewport[3] - viewer->core().viewport[1]));
+
+    // Allocate temporary buffers for image
+    Eigen::Matrix<unsigned char, Eigen::Dynamic, Eigen::Dynamic> R(width, height);
+    Eigen::Matrix<unsigned char, Eigen::Dynamic, Eigen::Dynamic> G(width, height);
+    Eigen::Matrix<unsigned char, Eigen::Dynamic, Eigen::Dynamic> B(width, height);
+    Eigen::Matrix<unsigned char, Eigen::Dynamic, Eigen::Dynamic> A(width, height);
+
+    // Draw the scene in the buffers
+    viewer->core().draw_buffer(viewer->data(), false, R, G, B, A);
+
+    // Save it to a PNG
+    igl::png::writePNG(R, G, B, A, export_url);
+
+    viewer->data().point_size /= scale;
 }
 
 }

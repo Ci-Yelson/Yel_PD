@@ -2,6 +2,8 @@ if(TARGET igl::core)
     return()
 endif()
 
+message(STATUS "Third-party: creating target 'igl::core'")
+
 include(FetchContent)
 FetchContent_Declare(
     libigl
