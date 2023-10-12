@@ -1,23 +1,22 @@
+// Copy from ipc
 
-// TODO:Mshio
+#pragma once
 
-// #pragma once
+#include <Eigen/Dense>
+#include <Eigen/Sparse>
 
-// #include <Eigen/Dense>
-// #include <Eigen/Sparse>
+namespace Util {
 
-// namespace Util {
+bool readTetMesh(const std::string& filePath,
+    Eigen::MatrixXd& TV, Eigen::MatrixXi& TT,
+    Eigen::MatrixXi& F, bool findSurface = true);
 
-// bool readTetMesh(const std::string& filePath,
-//     Eigen::MatrixXd& TV, Eigen::MatrixXi& TT,
-//     Eigen::MatrixXi& F, bool findSurface);
+bool readTetMesh_msh4(const std::string& filePath,
+    Eigen::MatrixXd& TV, Eigen::MatrixXi& TT,
+    Eigen::MatrixXi& F, bool findSurface = true);
 
-// bool readTetMesh_msh4(const std::string& filePath,
-//     Eigen::MatrixXd& TV, Eigen::MatrixXi& TT,
-//     Eigen::MatrixXi& F, bool findSurface);
+void readNodeEle(const std::string& filePath,
+    Eigen::MatrixXd& TV, Eigen::MatrixXi& TT,
+    Eigen::MatrixXi& F);
 
-// void readNodeEle(const std::string& filePath,
-//     Eigen::MatrixXd& TV, Eigen::MatrixXi& TT,
-//     Eigen::MatrixXi& F);
-
-// }
+}

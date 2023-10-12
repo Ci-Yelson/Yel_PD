@@ -165,19 +165,19 @@ bool PDViewer::pre_draw()
     }
 
     { // Camera test
-        std::cout << "=================================================\n";
-        std::cout << "Camera Info:\n";
-        std::cout << "  camera_center: " << viewer->core().camera_center.transpose() << "\n";
-        std::cout << "  camera_translation: " << viewer->core().camera_translation.transpose() << "\n";
-        std::cout << "  camera_eye: " << viewer->core().camera_eye.transpose() << "\n";
-        std::cout << "  camera_up: " << viewer->core().camera_up.transpose() << "\n";
-        std::cout << "  camera_view_angle: " << viewer->core().camera_view_angle << "\n";
-        std::cout << "  camera_base_zoom: " << viewer->core().camera_base_zoom << "\n";
-        std::cout << "  camera_zoom: " << viewer->core().camera_zoom << "\n";
-        std::cout << "  camera_dnear: " << viewer->core().camera_dnear << "\n";
-        std::cout << "  camera_dfar: " << viewer->core().camera_dfar << "\n";
-        std::cout << "  trackball_angle: " << viewer->core().trackball_angle << "\n";
-        std::cout << "=================================================\n";
+        // std::cout << "=================================================\n";
+        // std::cout << "Camera Info:\n";
+        // std::cout << "  camera_center: " << viewer->core().camera_center.transpose() << "\n";
+        // std::cout << "  camera_translation: " << viewer->core().camera_translation.transpose() << "\n";
+        // std::cout << "  camera_eye: " << viewer->core().camera_eye.transpose() << "\n";
+        // std::cout << "  camera_up: " << viewer->core().camera_up.transpose() << "\n";
+        // std::cout << "  camera_view_angle: " << viewer->core().camera_view_angle << "\n";
+        // std::cout << "  camera_base_zoom: " << viewer->core().camera_base_zoom << "\n";
+        // std::cout << "  camera_zoom: " << viewer->core().camera_zoom << "\n";
+        // std::cout << "  camera_dnear: " << viewer->core().camera_dnear << "\n";
+        // std::cout << "  camera_dfar: " << viewer->core().camera_dfar << "\n";
+        // std::cout << "  trackball_angle: " << viewer->core().trackball_angle << "\n";
+        // std::cout << "=================================================\n";
     }
 
     m_frameTimer.stopStopWatch();
@@ -694,8 +694,8 @@ void PDViewer::ProfilerWindow()
     ImGui::Begin("Profiler");
     static int s_SelectedProfilerIdx = 0;
     static std::pair<const char*, Util::Profiler*> PROFILERS[] = {
-        { "Simulator PreCompute", &g_PreComputeProfiler },
         { "Simulator Step", &g_StepProfiler },
+        { "Simulator PreCompute", &g_PreComputeProfiler },
         { "Frame", &g_FrameProfiler },
     };
     Util::Profiler& prof = *PROFILERS[s_SelectedProfilerIdx].second;

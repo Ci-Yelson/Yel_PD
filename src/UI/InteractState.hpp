@@ -6,6 +6,8 @@
 #include <fstream>
 #include <nlohmann/json.hpp>
 
+#include <spdlog/spdlog.h>
+
 namespace UI {
 struct DraggingState {
     bool isDragging{ false };
@@ -59,7 +61,7 @@ struct InteractState {
         double radiusMultiplierForProjSubspace = 2.2;
         int numberSampledConstraints = 1000; // [kt]
 
-        double massPerUnitArea = 2.0;
+        double massPerUnitArea = 1.0;
         double gravityConstant = 0.0007;
 
         // --------- Physics Params ---------
@@ -83,7 +85,7 @@ struct InteractState {
         double stiffness_laplacian = 2 * stiffness_stretch + stiffness_bending;
         double damping_coefficient = 0.001;
 
-        double gravityConstant = 0.1;
+        double gravityConstant = 1;
 
         int lbfgs_m = 5;
 
@@ -144,6 +146,7 @@ struct InteractState {
             hrpdParams.sigmaMin = data["sigmaMin"].get<double>();
         }
         // ...
+        spdlog::info(">>> After load file: {}", filepath);
     }
 };
 } // namespace UI

@@ -1,0 +1,7 @@
+{
+    "meshURL": "models/msh/bar-14114.msh",
+    "simulatorType": "QNPD",
+    
+    "timeStep": 0.033,
+    "numIterations": 10
+}

@@ -159,6 +159,8 @@ public:
 };
 
 struct QNPDTetConstraint : public Constraint {
+    inline static int P_tet_ct = 0;
+
 public:
     QNPDTetConstraint(unsigned int p1, unsigned int p2, unsigned int p3, unsigned int p4, PDVector& x);
     QNPDTetConstraint(const QNPDTetConstraint& other);

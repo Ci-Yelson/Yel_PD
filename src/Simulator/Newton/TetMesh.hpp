@@ -29,6 +29,7 @@ struct TetMesh {
     PDPositions m_restpose_positions; // [N x 3]
     PDPositions m_positions; // [N x 3]
     PDTriangles m_triangles; // [N x 3]
+    bool isTet = false;
     PDTets m_tets; // [e x 4]
 
     PDPositions m_velocities;
@@ -79,20 +80,20 @@ public:
     void InitTetConstraints(PDScalar mu, PDScalar lambda);
 
     // TODO
-    void EvalEnergy(Eigen::Matrix<PDScalar, -1, 3>& pos);
-    void EvalGradient(Eigen::Matrix<PDScalar, -1, 3>& pos);
-    void EvalHessian(Eigen::Matrix<PDScalar, -1, 3>& pos, bool definitness_fix = true);
+    void EvalEnergy(const Eigen::Matrix<PDScalar, -1, 1>& pos_vec);
+    void EvalGradient(const Eigen::Matrix<PDScalar, -1, 1>& pos_vec);
+    void EvalHessian(const Eigen::Matrix<PDScalar, -1, 1>& pos_vec, bool definitness_fix = true);
 
 public:
     // Math utils
     void reduced_to_full(Eigen::Matrix<PDScalar, -1, 3>& reduced, Eigen::Matrix<PDScalar, -1, 1>& full);
     void full_to_reduced(Eigen::Matrix<PDScalar, -1, 3>& reduced, Eigen::Matrix<PDScalar, -1, 1>& full);
 
-    Eigen::Matrix<PDScalar, 3, 3> Get_deformation_gradient(int tInd, Eigen::Matrix<PDScalar, -1, 3>& pos);
-    PDScalar Get_element_energy(int tInd, Eigen::Matrix<PDScalar, -1, 3>& pos);
-    Eigen::Matrix<PDScalar, 9, 12> Get_vec_dF_dx(int tInd, Eigen::Matrix<PDScalar, -1, 3>& pos);
-    Eigen::Matrix<PDScalar, 9, 1> Get_vec_dPhi_dF(int tInd, Eigen::Matrix<PDScalar, -1, 3>& pos);
-    Eigen::Matrix<PDScalar, 9, 9> Get_vec_d2Phi_dF2(int tInd, Eigen::Matrix<PDScalar, -1, 3>& pos);
+    Eigen::Matrix<PDScalar, 3, 3> Get_deformation_gradient(int tInd, const Eigen::Matrix<PDScalar, -1, 1>& pos_vec);
+    PDScalar Get_element_energy(int tInd, const Eigen::Matrix<PDScalar, -1, 1>& pos_vec);
+    Eigen::Matrix<PDScalar, 9, 12> Get_vec_dF_dx(int tInd, const Eigen::Matrix<PDScalar, -1, 1>& pos_vec);
+    Eigen::Matrix<PDScalar, 9, 1> Get_vec_dPhi_dF(int tInd, const Eigen::Matrix<PDScalar, -1, 1>& pos_vec);
+    Eigen::Matrix<PDScalar, 9, 9> Get_vec_d2Phi_dF2(int tInd, const Eigen::Matrix<PDScalar, -1, 1>& pos_vec);
 
     /// Matrix Projection onto Positive Semi-Definite Cone
     template <typename _Scalar, int _Rows, int _Cols, int _Options, int _MaxRows, int _MaxCols>

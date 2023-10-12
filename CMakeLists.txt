@@ -71,7 +71,7 @@ target_link_libraries(${PROJECT_NAME} PUBLIC spdlog::spdlog_header_only)
 find_package(nlohmann_json REQUIRED)
 target_link_libraries(${PROJECT_NAME} PUBLIC nlohmann_json::nlohmann_json)
 
-# ghs filesystem
+# ghc filesystem
 find_package(filesystem REQUIRED)
 target_link_libraries(${PROJECT_NAME} PUBLIC ghc::filesystem)
 

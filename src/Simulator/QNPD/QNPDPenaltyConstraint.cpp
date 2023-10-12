@@ -156,11 +156,15 @@ void QNPDPenaltyConstraint::EvaluateHessian(const PDVector& x, bool definiteness
 
 void QNPDPenaltyConstraint::EvaluateHessian(const PDVector& x, std::vector<PDSparseMatrixTriplet>& hessian_triplets, bool definiteness_fix, int index)
 {
+    // spdlog::info(">>> QNPDPenaltyConstraint::EvaluateHessian()");
     EvaluateHessian(x, definiteness_fix);
+    // spdlog::info(">>> QNPDPenaltyConstraint::EvaluateHessian() - After");
+    if (m_p0 == -1) return;
     if (index == -1) {
         for (unsigned int i = 0; i != 3; i++) {
             hessian_triplets.push_back(PDSparseMatrixTriplet(3 * m_p0 + i, 3 * m_p0 + i, m_H(i, i)));
         }
+        // spdlog::info(">>> QNPDPenaltyConstraint::EvaluateHessian() - After set to triplets");
     }
     else {
         int triplets_count = 0;

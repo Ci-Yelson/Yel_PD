@@ -3,11 +3,14 @@
 #include "Simulator/PDTypeDef.hpp"
 #include "UI/InteractState.hpp"
 #include "Util/Profiler.hpp"
+#include "Util/StoreData.hpp"
 #include "Util/Timer.hpp"
 
 #include "spdlog/spdlog.h"
 #include <cstddef>
+#include <fstream>
 #include <memory>
+#include <string>
 #include <vector>
 
 extern UI::InteractState g_InteractState;
@@ -75,7 +78,7 @@ void QNPDSimulator::LoadParamsAndApply()
 
 void QNPDSimulator::Reset()
 {
-    m_mesh->m_total_mass = 10;
+    m_mesh->m_total_mass = 1;
     m_mesh->ResetPositions();
 
     setupConstraints();
@@ -157,12 +160,23 @@ void QNPDSimulator::Step()
 
     // m_cur_positions = Eigen::Map<PDPositions>(m_mesh->m_current_positions_vec.data(), m_mesh->m_vertices_number, 3);
     PD_PARALLEL_FOR
-    for (size_t i = 0; i < m_mesh->m_vertices_number; i++) {
+    for (int i = 0; i < m_mesh->m_vertices_number; i++) {
         for (int j = 0; j < 3; j++) {
             m_mesh->m_positions(i, j) = m_mesh->m_current_positions_vec[3 * i + j];
         }
     }
     // spdlog::info(">>> m_cur_positions size = ({}, {})", m_cur_positions.rows(), m_cur_positions.cols());
+
+    {
+        static int timestep = 0;
+        std::ofstream f;
+        f.open("./debug/QNPD/m_y/" + std::to_string(timestep));
+        f << m_y;
+        f.close();
+        
+        Util::storeData(m_mesh->m_positions, m_mesh->m_triangles, "./debug/QNPD/objs/" + std::to_string(timestep) + ".obj", true);
+        timestep++;
+    }
 
     m_dt = old_h;
     // spdlog::info(">>>After QNPDSimulator::step()");
@@ -180,7 +194,7 @@ void QNPDSimulator::UpdateTimeStep()
 void QNPDSimulator::setMaterialProperty(std::vector<Constraint*>& constraints)
 {
     PD_PARALLEL_FOR
-    for (size_t i = 0; i < constraints.size(); i++) {
+    for (int i = 0; i < constraints.size(); i++) {
         constraints[i]->SetMaterialProperty(m_material_type, m_stiffness_stretch, m_stiffness_bending, m_stiffness_kappa, m_stiffness_laplacian);
     }
     m_precomputing_flag = false;
@@ -204,11 +218,19 @@ void QNPDSimulator::setupConstraints()
     PDScalar total_volume = 0;
     std::vector<PDSparseMatrixTriplet> mass_triplets, mass_1d_triplets;
     PDVector& x = m_mesh->m_current_positions_vec;
+    PDVector mass_vec;
+    mass_vec.setZero(m_mesh->m_vertices_number, 1);
     for (size_t i = 0; i < m_mesh->m_tets.rows(); i++) {
         auto tet = m_mesh->m_tets.row(i);
         QNPDTetConstraint* c = new QNPDTetConstraint(tet[0], tet[1], tet[2], tet[3], x);
         m_constraints.push_back(c);
-        total_volume += c->SetMassMatrix(mass_triplets, mass_1d_triplets);
+        PDScalar cur_vol;
+        cur_vol = c->SetMassMatrix(mass_triplets, mass_1d_triplets);
+        // total_volume += c->SetMassMatrix(mass_triplets, mass_1d_triplets);
+        total_volume += cur_vol;
+        for (int k = 0; k < 4; k++) {
+            mass_vec(c->m_p[k]) += 0.25 * cur_vol;
+        }
     }
     // spdlog::info(">>> m_mesh->m_tets size = {}", m_mesh->m_tets.rows());
     // std::cout << m_mesh->m_tets.row(0) << std::endl;
@@ -218,6 +240,10 @@ void QNPDSimulator::setupConstraints()
         m_mesh->m_mass_matrix_1d.setFromTriplets(mass_1d_triplets.begin(), mass_1d_triplets.end());
         m_mesh->m_mass_matrix = m_mesh->m_mass_matrix * (m_mesh->m_total_mass / total_volume);
         m_mesh->m_mass_matrix_1d = m_mesh->m_mass_matrix_1d * (m_mesh->m_total_mass / total_volume);
+
+        // for (int i = 0; i < mass_vec.rows(); i++) mass_vec(i) *= (m_mesh->m_total_mass / total_volume);
+        mass_vec = mass_vec * (m_mesh->m_total_mass / total_volume);
+        spdlog::info("Total volume: {}, Normalize vertex mass: {}", total_volume, (m_mesh->m_total_mass / total_volume));
         // spdlog::info(">>>After QNPDSimulator::setupConstraints() - ok 2");
 
         std::vector<PDSparseMatrixTriplet> mass_inv_triplets, mass_inv_1d_triplets;
@@ -244,6 +270,7 @@ void QNPDSimulator::setupConstraints()
                 // ugly ugly!
                 m_mesh->m_mass_matrix_1d.coeffRef(i, i) = 1e-12;
                 mi_inv = 1e12;
+                mass_vec[i] = 1e-12;
             }
             mass_inv_1d_triplets.push_back(PDSparseMatrixTriplet(i, i, mi_inv));
         }
@@ -252,7 +279,41 @@ void QNPDSimulator::setupConstraints()
     }
     setMaterialProperty(m_constraints);
 
-    // spdlog::info(">>>After QNPDSimulator::setupConstraints()");
+    { // debug
+        std::ofstream f;
+        f.open("./debug/QNPD/mesh_info");
+        f << fmt::format("V nums = {}, Tet nums = {}\n", m_mesh->m_vertices_number, m_mesh->m_tets.rows());
+        for (int i = 0; i < m_mesh->m_positions.rows(); i++) {
+            f << fmt::format("V {}: ", i);
+            f << m_mesh->m_positions.row(i);
+            f << "\n";
+        }
+        for (int i = 0; i < m_mesh->m_tets.rows(); i++) {
+            f << fmt::format("Tet {}: ", i);
+            f << m_mesh->m_tets.row(i);
+            f << "\n";
+        }
+        f.close();
+
+        f.open("./debug/QNPD/mass_vec");
+        f << fmt::format("Size = ({}, {})\n", mass_vec.rows(), mass_vec.cols());
+        f << mass_vec;
+        f.close();
+
+        // PDMatrix mass_1d = m_mesh->m_mass_matrix_1d;
+        // f.open("./debug/QNPD/mass_1d");
+        // f << fmt::format("Size = ({}, {})\n", mass_1d.rows(), mass_1d.cols());
+        // f << mass_1d;
+        // f.close();
+
+        // PDMatrix mass_3d = m_mesh->m_mass_matrix;
+        // f.open("./debug/QNPD/mass_3d");
+        // f << fmt::format("Size = ({}, {})\n", mass_3d.rows(), mass_3d.cols());
+        // f << mass_3d;
+        // f.close();
+    }
+
+    spdlog::info(">>>After QNPDSimulator::setupConstraints()");
 }
 
 void QNPDSimulator::calculateExternalForce()
@@ -263,7 +324,7 @@ void QNPDSimulator::calculateExternalForce()
 
     // gravity
     PD_PARALLEL_FOR
-    for (unsigned int i = 0; i < m_mesh->m_vertices_number; ++i) {
+    for (int i = 0; i < m_mesh->m_vertices_number; ++i) {
         m_external_force[3 * i + 1] += -g_InteractState.qnpdParams.gravityConstant;
     }
 
@@ -288,6 +349,7 @@ void QNPDSimulator::collisionDetection(const PDVector& x)
         int v = g_InteractState.draggingState.vertex;
         auto add = (1.0 / m_dt2) * g_InteractState.draggingState.force.cast<PDScalar>();
         surface_point = { x[3 * v] + add[0], x[3 * v + 1] + add[1], x[3 * v + 2] + add[2] };
+        normal = add;
         // m_collision_constraints[v] = QNPDPenaltyConstraint(1e-4, v, surface_point, normal);
         m_collision_constraints[v] = QNPDPenaltyConstraint(1, v, surface_point, normal);
         // spdlog::info(">>> collisionDetection - Add Drag - v = {}", v);
@@ -299,7 +361,7 @@ void QNPDSimulator::collisionDetection(const PDVector& x)
         for (int i = 0; i < m_mesh->m_vertices_number; i++) {
             if (x[3 * i + 1] < 0) {
                 EigenVector3 surface_point = { x[3 * i], 0, x[3 * i + 2] };
-                EigenVector3 normal{ 0, 0, 0 };
+                EigenVector3 normal{ 0, 1, 0 };
                 m_collision_constraints[i] = (QNPDPenaltyConstraint(1e2, i, surface_point, normal));
             }
         }
@@ -340,10 +402,16 @@ bool QNPDSimulator::performGradientDescentOneIteration(PDVector& x)
 
 bool QNPDSimulator::performNewtonsMethodOneIteration(PDVector& x)
 {
+    PROFILE_STEP("NewtonOneIteration");
+    // spdlog::info(">>> QNPDSimulator::performGradientDescentOneIteration()");
     // TimerWrapper timer; timer.Tic();
     // evaluate gradient direction
     PDVector gradient;
-    evaluateGradient(x, gradient, true);
+    {
+        PROFILE_STEP("EvalGrad");
+        evaluateGradient(x, gradient, true);
+    }
+    // spdlog::info(">>> QNPDSimulator::performGradientDescentOneIteration() - After evaluateGradient()");
     // QSEvaluateGradient(x, gradient, m_ss->m_quasi_static);
 #ifdef ENABLE_MATLAB_DEBUGGING
     g_debugger->SendVector(gradient, "g");
@@ -354,7 +422,11 @@ bool QNPDSimulator::performNewtonsMethodOneIteration(PDVector& x)
 
     // evaluate hessian matrix
     PDSparseMatrix hessian_1;
-    evaluateHessian(x, hessian_1);
+    {
+        PROFILE_STEP("EvalHessian");
+        evaluateHessian(x, hessian_1);
+    }
+    // spdlog::info(">>> QNPDSimulator::performGradientDescentOneIteration() - After evaluateHessian()");
     // PDSparseMatrix hessian_2;
     // evaluateHessianSmart(x, hessian_2);
 
@@ -369,14 +441,23 @@ bool QNPDSimulator::performNewtonsMethodOneIteration(PDVector& x)
     // timer.Tic();
     PDVector descent_dir;
 
-    linearSolve(descent_dir, hessian, gradient);
+    {
+        PROFILE_STEP("LinearSolve");
+        linearSolve(descent_dir, hessian, gradient);
+    }
+    // spdlog::info(">>> QNPDSimulator::performGradientDescentOneIteration() - After linearSolve()");
     descent_dir = -descent_dir;
 
     // timer.TocAndReport("solve time", m_verbose_show_converge);
     // timer.Tic();
 
     // line search
-    PDScalar step_size = lineSearch(x, gradient, descent_dir);
+    PDScalar step_size = 1;
+    {
+        PROFILE_STEP("LineSearch");
+        step_size = lineSearch(x, gradient, descent_dir);
+    }
+    // spdlog::info(">>> QNPDSimulator::performGradientDescentOneIteration() - After lineSearch()");
     // if (step_size < EPSILON)
     //{
     //	std::cout << "correct step size to 1" << std::endl;
@@ -515,28 +596,45 @@ bool QNPDSimulator::performLBFGSOneIteration(PDVector& x) // [###]
 
 void QNPDSimulator::evaluateGradient(const PDVector& x, PDVector& gradient, bool enable_omp)
 {
+    PDVector gradient_pure(gradient.rows(), gradient.cols());
     PDScalar h_square = m_dt * m_dt;
     switch (m_integration_method) {
     case INTEGRATION_QUASI_STATICS:
-        evaluateGradientPureConstraint(x, m_external_force, gradient);
-        gradient -= m_external_force;
+        evaluateGradientPureConstraint(x, m_external_force, gradient_pure);
+        gradient = gradient_pure - m_external_force;
         break; // DO NOTHING
     case INTEGRATION_IMPLICIT_EULER:
-        evaluateGradientPureConstraint(x, m_external_force, gradient);
-        gradient = m_mesh->m_mass_matrix * (x - m_y) + h_square * gradient;
+        evaluateGradientPureConstraint(x, m_external_force, gradient_pure);
+        gradient = m_mesh->m_mass_matrix * (x - m_y) + h_square * gradient_pure;
         break;
     case INTEGRATION_IMPLICIT_BDF2:
-        evaluateGradientPureConstraint(x, m_external_force, gradient);
-        gradient = m_mesh->m_mass_matrix * (x - m_y) + (h_square * 4.0 / 9.0) * gradient;
+        evaluateGradientPureConstraint(x, m_external_force, gradient_pure);
+        gradient = m_mesh->m_mass_matrix * (x - m_y) + (h_square * 4.0 / 9.0) * gradient_pure;
         break;
     case INTEGRATION_IMPLICIT_MIDPOINT:
-        evaluateGradientPureConstraint((x + m_mesh->m_current_positions_vec) / 2, m_external_force, gradient);
-        gradient = m_mesh->m_mass_matrix * (x - m_y) + h_square / 2 * (gradient);
+        evaluateGradientPureConstraint((x + m_mesh->m_current_positions_vec) / 2, m_external_force, gradient_pure);
+        gradient = m_mesh->m_mass_matrix * (x - m_y) + h_square / 2 * (gradient_pure);
         break;
     case INTEGRATION_IMPLICIT_NEWMARK_BETA:
-        evaluateGradientPureConstraint(x, m_external_force, gradient);
-        gradient = m_mesh->m_mass_matrix * (x - m_y) + h_square / 4 * (gradient + m_z);
+        evaluateGradientPureConstraint(x, m_external_force, gradient_pure);
+        gradient = m_mesh->m_mass_matrix * (x - m_y) + h_square / 4 * (gradient_pure + m_z);
         break;
+    }
+
+    static int ct = 0;
+    if (ct < 100) { // debug
+        std::ofstream f;
+        f.open("./debug/QNPD/grad_pure/grad_pure_iter_" + std::to_string(ct));
+        f << fmt::format("Size = ({}, {})\n", gradient_pure.rows(), gradient_pure.cols());
+        f << gradient_pure;
+        f.close();
+
+        f.open("./debug/QNPD/grad/grad_iter_" + std::to_string(ct));
+        f << fmt::format("Size = ({}, {})\n", gradient.rows(), gradient.cols());
+        f << gradient;
+        f.close();
+
+        ct++;
     }
 }
 
@@ -680,7 +778,7 @@ void QNPDSimulator::evaluateLaplacianPureConstraint(PDSparseMatrix& laplacian_ma
     std::vector<PDSparseMatrixTriplet> l_triplets(16 * 9 * m_constraints.size());
 
     PD_PARALLEL_FOR
-    for (size_t i = 0; i < m_constraints.size(); i++) {
+    for (int i = 0; i < m_constraints.size(); i++) {
         m_constraints[i]->EvaluateWeightedLaplacian(l_triplets, i);
     }
 
@@ -694,10 +792,10 @@ void QNPDSimulator::evaluateLaplacianPureConstraint1D(PDSparseMatrix& laplacian_
     std::vector<PDSparseMatrixTriplet> l_1d_triplets(16 * m_constraints.size());
 
     PD_PARALLEL_FOR
-    for (size_t i = 0; i < m_constraints.size(); i++) {
+    for (int i = 0; i < m_constraints.size(); i++) {
         m_constraints[i]->EvaluateWeightedLaplacian1D(l_1d_triplets, i);
     }
-    // for (size_t i = 0; i < m_constraints.size(); i++) {
+    // for (int i = 0; i < m_constraints.size(); i++) {
     //     m_constraints[i]->EvaluateWeightedLaplacian1D(l_1d_triplets);
     // }
 
@@ -707,32 +805,52 @@ void QNPDSimulator::evaluateLaplacianPureConstraint1D(PDSparseMatrix& laplacian_
 
 void QNPDSimulator::evaluateHessian(const PDVector& x, PDSparseMatrix& hessian_matrix)
 {
+    PDSparseMatrix hessian_pure(hessian_matrix.rows(), hessian_matrix.cols());
     PDScalar h_square = m_dt * m_dt;
     switch (m_integration_method) {
     case INTEGRATION_QUASI_STATICS:
-        evaluateHessianPureConstraint(x, hessian_matrix);
+        evaluateHessianPureConstraint(x, hessian_pure);
+        hessian_matrix = hessian_pure;
         break; // DO NOTHING
     case INTEGRATION_IMPLICIT_EULER:
-        evaluateHessianPureConstraint(x, hessian_matrix);
-        hessian_matrix = m_mesh->m_mass_matrix + h_square * hessian_matrix;
+        evaluateHessianPureConstraint(x, hessian_pure);
+        hessian_matrix = m_mesh->m_mass_matrix + h_square * hessian_pure;
         break;
     case INTEGRATION_IMPLICIT_BDF2:
-        evaluateHessianPureConstraint(x, hessian_matrix);
-        hessian_matrix = m_mesh->m_mass_matrix + h_square * 4.0 / 9.0 * hessian_matrix;
+        evaluateHessianPureConstraint(x, hessian_pure);
+        hessian_matrix = m_mesh->m_mass_matrix + h_square * 4.0 / 9.0 * hessian_pure;
         break;
     case INTEGRATION_IMPLICIT_MIDPOINT:
-        evaluateHessianPureConstraint((x + m_mesh->m_current_positions_vec) / 2, hessian_matrix);
-        hessian_matrix = m_mesh->m_mass_matrix + h_square / 4 * hessian_matrix;
+        evaluateHessianPureConstraint((x + m_mesh->m_current_positions_vec) / 2, hessian_pure);
+        hessian_matrix = m_mesh->m_mass_matrix + h_square / 4 * hessian_pure;
         break;
     case INTEGRATION_IMPLICIT_NEWMARK_BETA:
-        evaluateHessianPureConstraint(x, hessian_matrix);
-        hessian_matrix = m_mesh->m_mass_matrix + h_square / 4 * hessian_matrix;
+        evaluateHessianPureConstraint(x, hessian_pure);
+        hessian_matrix = m_mesh->m_mass_matrix + h_square / 4 * hessian_pure;
         break;
+    }
+
+    static int ct = 0;
+    if (ct < 100) { // debug
+
+        std::ofstream f;
+        f.open("./debug/QNPD/hessian_pure/hessian_pure_iter_" + std::to_string(ct));
+        f << fmt::format("Size = ({}, {})\n", hessian_pure.rows(), hessian_pure.cols());
+        f << hessian_pure;
+        f.close();
+
+        f.open("./debug/QNPD/hessian/hessian_iter_" + std::to_string(ct));
+        f << fmt::format("Size = ({}, {})\n", hessian_matrix.rows(), hessian_matrix.cols());
+        f << hessian_matrix;
+        f.close();
+
+        ct++;
     }
 }
 
 void QNPDSimulator::evaluateHessianPureConstraint(const PDVector& x, PDSparseMatrix& hessian_matrix)
 {
+    // spdlog::info(">>> QNPDSimulator::evaluateHessianPureConstraint()");
     hessian_matrix.resize(m_mesh->m_system_dimension, m_mesh->m_system_dimension);
     std::vector<PDSparseMatrixTriplet> h_triplets;
     h_triplets.clear();
@@ -742,6 +860,7 @@ void QNPDSimulator::evaluateHessianPureConstraint(const PDVector& x, PDSparseMat
     }
 
     hessian_matrix.setFromTriplets(h_triplets.begin(), h_triplets.end());
+    // spdlog::info(">>> QNPDSimulator::evaluateHessianPureConstraint() - After");
 
     if (m_processing_collision) {
         PDSparseMatrix HC;
@@ -752,6 +871,7 @@ void QNPDSimulator::evaluateHessianPureConstraint(const PDVector& x, PDSparseMat
 
 void QNPDSimulator::evaluateHessianCollision(const PDVector& x, PDSparseMatrix& hessian_matrix)
 {
+    // spdlog::info(">>> QNPDSimulator::evaluateHessianCollision()");
     hessian_matrix.resize(m_mesh->m_system_dimension, m_mesh->m_system_dimension);
     std::vector<PDSparseMatrixTriplet> h_triplets;
     h_triplets.clear();
@@ -760,7 +880,9 @@ void QNPDSimulator::evaluateHessianCollision(const PDVector& x, PDSparseMatrix& 
         it->EvaluateHessian(x, h_triplets, m_definiteness_fix);
     }
 
+    // spdlog::info(">>> QNPDSimulator::evaluateHessianCollision() - Before setFromTriplets");
     hessian_matrix.setFromTriplets(h_triplets.begin(), h_triplets.end());
+    // spdlog::info(">>> QNPDSimulator::evaluateHessianCollision() - After");
 }
 
 PDScalar QNPDSimulator::evaluateEnergyPureConstraint(const PDVector& x, const PDVector& f_ext)
@@ -921,7 +1043,7 @@ void QNPDSimulator::factorizeDirectSolverLLT(const PDSparseMatrix& A, PDSparseLL
             assert(A.rows() == A.cols());
             std::vector<PDSparseMatrixTriplet> triplets(A.rows());
             PD_PARALLEL_FOR
-            for (size_t i = 0; i < A.rows(); i++) {
+            for (int i = 0; i < A.rows(); i++) {
                 triplets[i] = (PDSparseMatrixTriplet(i, i, 1));
             }
             I.resize(A.rows(), A.cols());
@@ -999,7 +1121,7 @@ void QNPDSimulator::LBFGSKernelLinearSolve(PDVector& r, PDVector rhs, PDScalar s
     EigenMatrixx3 rhs_n3(rhs.size() / 3, 3);
     { // Vector3mx1ToMatrixmx3(rhs, rhs_n3);
         PD_PARALLEL_FOR
-        for (size_t i = 0; i < rhs_n3.rows(); i++) {
+        for (int i = 0; i < rhs_n3.rows(); i++) {
             rhs_n3.block<1, 3>(i, 0) = rhs.block<3, 1>(3 * i, 0).transpose();
         }
     }
@@ -1015,7 +1137,7 @@ void QNPDSimulator::LBFGSKernelLinearSolve(PDVector& r, PDVector rhs, PDScalar s
     // convert the result back
     { // Matrixmx3ToVector3mx1(r_n3, r);
         PD_PARALLEL_FOR
-        for (size_t i = 0; i < r_n3.rows(); i++) {
+        for (int i = 0; i < r_n3.rows(); i++) {
             r.block<3, 1>(3 * i, 0) = r_n3.block<1, 3>(i, 0).transpose();
         }
     }

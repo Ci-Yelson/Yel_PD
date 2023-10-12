@@ -1,5 +1,7 @@
 #include "NewtonSimulator.hpp"
+#include <fstream>
 #include <memory>
+#include <string>
 
 // TODO
 // #include "polysolve/LinearSolver.hpp"
@@ -60,7 +62,6 @@ void NewtonSimulator::Step()
     PROFILE_STEP("NEWTON_STEP");
     int _N = m_mesh->m_positions.rows();
     constexpr PDScalar NaN = std::numeric_limits<PDScalar>::quiet_NaN();
-    Eigen::SparseMatrix<PDScalar> objHessian;
     // ---------------------------
     // Initialize the minimization
     // ---------------------------
@@ -72,33 +73,89 @@ void NewtonSimulator::Step()
 
     // Handle interaction - by directly edit `s` way.
     HandleInteraction(m_s);
-    m_x = m_s;
 
-    PDPositions x3;
-    EvalObjEnergy();
-    Eigen::Matrix<PDScalar, -1, 1>& objGrad = m_mesh->m_Grad;
+    static int timestep = 0;
+    {
+        std::ifstream f;
+        f.open("./debug/QNPD/m_y/" + std::to_string(timestep));
+        for (int i = 0; i < m_s.rows(); i++) {
+            f >> m_s(i);
+        }
+        f.close();
+    }
+    {
+        std::ifstream f;
+        f.open("./debug/QNPD/objs/" + std::to_string(timestep) + ".obj");
+        char ch;
+        for (int i = 0; i < m_mesh->m_positions.rows(); i++) {
+            f >> ch;
+            f >> m_mesh->m_positions(i, 0) >> m_mesh->m_positions(i, 1) >> m_mesh->m_positions(i, 2);
+        }
+        f.close();
+        m_mesh->reduced_to_full(m_mesh->m_positions, m_mesh->m_positions_vec);
+        m_mesh->m_velocities_vec = (m_mesh->m_positions_vec - x_pre) / m_dt;
+    }
+
+    PDVector x = m_s;
+
+    EvalObjEnergy(x);
+    Eigen::Matrix<PDScalar, -1, 1> objGrad(m_mesh->m_Grad.rows(), m_mesh->m_Grad.cols());
+    Eigen::SparseMatrix<PDScalar> objHessian;
     Eigen::Matrix<PDScalar, -1, 1> delta_x;
     delta_x.setZero(_N * 3, 1);
 
     bool _CONVERGE = false;
     for (int i = 0; !_CONVERGE && i < 10; i++) {
         spdlog::info(">>> NewtonSimulator::Step() - Substep = {}", i);
-        m_mesh->full_to_reduced(x3, m_x);
-        m_mesh->EvalGradient(x3);
-        m_mesh->EvalHessian(x3);
         // Complete Gradient
-        objGrad = m_mesh->m_mass_matrix * (m_x - m_s) + m_dt2 * m_mesh->m_Grad;
-        // Complete Hessian - INTEGRATION_IMPLICIT_EULER
-        objHessian = m_mesh->m_mass_matrix + m_dt2 * m_mesh->m_H;
+        m_mesh->EvalGradient(x);
+        objGrad = m_mesh->m_mass_matrix * (x - m_s) + m_dt2 * m_mesh->m_Grad;
+        {
+            static int ct = 0;
+            if (ct < 100) {
+                std::ofstream f;
+                f.open("./debug/NT/grad_pure/" + std::to_string(ct));
+                f << fmt::format("Size = ({}, {})\n", m_mesh->m_Grad.rows(), m_mesh->m_Grad.cols());
+                f << m_mesh->m_Grad;
+                f.close();
 
-        { // TODO: polysolve
-          // auto solver = polysolve::LinearSolver::create("Eigen::SimplicialLDLT", "");
-          // solver->analyzePattern(objHessian, objHessian.rows());
-          // solver->factorize(objHessian);
-          // solver->solve(m_mesh->m_Grad, delta_x);
-          // delta_x = -delta_x;
+                f.open("./debug/NT/grad/" + std::to_string(ct));
+                f << fmt::format("Size = ({}, {})\n", objGrad.rows(), objGrad.cols());
+                f << objGrad;
+                f.close();
+
+                ct++;
+            }
         }
-        { // Debug
+        // Complete Hessian - INTEGRATION_IMPLICIT_EULER
+        m_mesh->EvalHessian(x);
+        objHessian = m_mesh->m_mass_matrix + m_dt2 * m_mesh->m_H;
+        {
+            static int ct = 0;
+            if (ct < 100) {
+                std::ofstream f;
+                f.open("./debug/NT/hessian_pure/" + std::to_string(ct));
+                f << fmt::format("Size = ({}, {})\n", m_mesh->m_H.rows(), m_mesh->m_H.cols());
+                f << m_mesh->m_H;
+                f.close();
+
+                f.open("./debug/NT/hessian/" + std::to_string(ct));
+                f << fmt::format("Size = ({}, {})\n", objHessian.rows(), objHessian.cols());
+                f << objHessian;
+                f.close();
+
+                ct++;
+            }
+        }
+
+        {
+            // TODO: polysolve
+            // auto solver = polysolve::LinearSolver::create("Eigen::SimplicialLDLT", "");
+            // solver->analyzePattern(objHessian, objHessian.rows());
+            // solver->factorize(objHessian);
+            // solver->solve(m_mesh->m_Grad, delta_x);
+            // delta_x = -delta_x;
+        } { // Debug
             objHessian.setIdentity();
         }
         PDSparseSolver solver;
@@ -109,19 +166,26 @@ void NewtonSimulator::Step()
         delta_x = -delta_x;
 
         // Line Search
-        EvalObjEnergy();
+        EvalObjEnergy(x);
         spdlog::info(">>> Before LS - m_objE = {}", m_objE);
-        double alpha_k = Linesearch(m_x, m_objE, objGrad, delta_x, m_ls.prefetched_energy, m_ls.prefetched_gradient);
-        m_x += alpha_k * delta_x;
-        m_mesh->m_positions_vec = m_x;
+        double alpha_k = Linesearch(x, m_objE, objGrad, delta_x, m_ls.prefetched_energy, m_ls.prefetched_gradient);
+        x += alpha_k * delta_x;
+        m_mesh->m_positions_vec = x;
 
         PDScalar gradNorm = delta_x.norm();
         spdlog::info(">>> NewtonSimulator::Step() - Substep = {}, grad_norm = {}", i, gradNorm);
     };
 
-    m_mesh->m_velocities_vec = (m_x - x_pre) / m_dt;
-    m_mesh->m_positions_vec = m_x;
+    m_mesh->m_velocities_vec = (x - x_pre) / m_dt;
+    m_mesh->m_positions_vec = x;
     m_mesh->full_to_reduced(m_mesh->m_positions, m_mesh->m_positions_vec);
+
+    {
+        std::ofstream f;
+        f.open("./debug/QNPD/m_y/" + std::to_string(timestep));
+        f << m_s;
+        f.close();
+    }
 }
 
 void NewtonSimulator::Reset()
@@ -136,7 +200,7 @@ void NewtonSimulator::EvalFext()
     m_fExt_vec.setZero(m_mesh->m_system_dim);
     {
         PD_PARALLEL_FOR
-        for (unsigned int i = 0; i < m_mesh->m_positions.rows(); ++i) {
+        for (int i = 0; i < m_mesh->m_positions.rows(); ++i) {
             m_fExt_vec[3 * i + 1] += -g_InteractState.newtonParams.gravityConstant * m_mesh->m_vertexMasses[i];
             for (int j = 0; j < 3; j++) {
                 m_fExt_vec[3 * i + j] /= m_mesh->m_vertexMasses[i];
@@ -145,12 +209,10 @@ void NewtonSimulator::EvalFext()
     }
 }
 
-void NewtonSimulator::EvalObjEnergy()
+void NewtonSimulator::EvalObjEnergy(const PDVector& x)
 {
-    PDScalar inertia_term = 0.5 * (m_x - m_s).transpose() * m_mesh->m_mass_matrix * (m_x - m_s);
-    PDPositions _x3;
-    m_mesh->full_to_reduced(_x3, m_x);
-    m_mesh->EvalEnergy(_x3);
+    PDScalar inertia_term = 0.5 * (x - m_s).transpose() * m_mesh->m_mass_matrix * (x - m_s);
+    m_mesh->EvalEnergy(x);
     m_objE = inertia_term + m_dt2 * m_mesh->m_E;
 }
 
@@ -160,7 +222,7 @@ double NewtonSimulator::Linesearch(PDVector& x, PDScalar current_energy, PDVecto
     if (!m_ls.enable_line_search) {
         return m_ls.step_size;
     }
-    PDVector x0 = x;
+    PDVector x_plus_tdx(m_mesh->m_system_dim);
     PDScalar t = 1.0 / m_ls.beta;
     PDScalar lhs, rhs;
     PDScalar currentObjectiveValue = current_energy;
@@ -169,13 +231,12 @@ double NewtonSimulator::Linesearch(PDVector& x, PDScalar current_energy, PDVecto
     do {
         iter_cnt++;
         t *= m_ls.beta;
-        // Temporary update - for update obj energy.
-        m_x = m_mesh->m_positions_vec = x0 + t * descent_dir;
+        x_plus_tdx = x + t * descent_dir;
 
         lhs = 1e15;
         rhs = 0;
         try {
-            EvalObjEnergy();
+            EvalObjEnergy(x_plus_tdx);
             lhs = m_objE;
         }
         catch (const std::exception&) {
@@ -196,7 +257,6 @@ double NewtonSimulator::Linesearch(PDVector& x, PDScalar current_energy, PDVecto
         next_gradient_dir = gradient_dir;
     }
     m_ls.step_size = t;
-    m_x = m_mesh->m_positions_vec = x0;
 
     { // log
         spdlog::info("Linesearch Iters = {}, Stepsize = {}, E_curr = {}, E_prev = {}", iter_cnt, t, lhs, currentObjectiveValue);

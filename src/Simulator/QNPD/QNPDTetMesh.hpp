@@ -15,6 +15,7 @@ struct QNPDTetMesh {
     PDPositions m_restpose_positions; // 3xm
     PDPositions m_positions; // 3xm
     PDTriangles m_triangles; // 3xm
+    bool isTet = false;
     PDTets m_tets; // 4xtn
 
     unsigned int m_vertices_number; // m

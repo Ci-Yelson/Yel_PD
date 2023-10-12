@@ -15,21 +15,23 @@ struct NewtonSimulator : public PDSimulator {
 
     // ----------------- Config -----------------
     // TODO: USE GLOBAL dt ?
-    PDScalar m_dt{ 16 }, m_dt2{ 16 * 16 }, m_dt2inv{ 1.0f / (16 * 16) };
+    PDScalar m_dt{ 0.0333 }; // 1/30 second.
+    PDScalar m_dt2 = m_dt * m_dt;
+    PDScalar m_dt2inv = 1.0 / m_dt2;
     void UpdateTimeStep() override
     {
         // TODO
     }
 
 public: // Simulation data
-    PDVector m_x, m_s;
+    PDVector m_s;
 
     // -- For f_{ext}
     PDVector m_fExt_vec;
     void EvalFext();
 
     PDScalar m_objE;
-    void EvalObjEnergy();
+    void EvalObjEnergy(const PDVector& x);
 
 public: // line search
     struct LineSearchConfig {

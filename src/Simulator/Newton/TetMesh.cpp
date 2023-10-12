@@ -2,16 +2,22 @@
 
 #include "Eigen/SVD"
 
+#include <fstream>
 #include <igl/copyleft/tetgen/cdt.h>
 #include <igl/readOBJ.h>
 #include <igl/readSTL.h>
 #include <igl/remove_duplicate_vertices.h>
 #include <spdlog/spdlog.h>
+#include <string>
+
+#include "Util/MeshIO.hpp"
 
 #include "Simulator/PDTypeDef.hpp"
 #include "UI/InteractState.hpp"
 
 #include "igl/jet.h"
+
+#define block_vector(a) block<3, 1>(3 * (a), 0)
 
 extern UI::InteractState g_InteractState;
 
@@ -70,18 +76,34 @@ TetMesh::TetMesh(std::string meshURL)
         m_positions = _V.cast<double>();
         m_triangles = _F.cast<int>();
     }
+    else if (fileSuffix == "msh") {
+        Eigen::MatrixXd TV;
+        Eigen::MatrixXi TT, TF;
+        if (!Util::readTetMesh(meshURL, TV, TT, TF)) {
+            spdlog::error("Failed to read {}", meshURL);
+            exit(1);
+        }
+        m_positions = TV.cast<PDScalar>();
+        m_tets = TT.cast<PDIndex>();
+        m_triangles = TF.cast<PDIndex>();
+        isTet = true;
+    }
 
     // igl::read_triangle_mesh(meshURL, m_positions, m_triangles);
-    spdlog::info("Mesh loaded: {} vertices, {} faces", m_positions.rows(), m_triangles.rows());
-
+    if (isTet) {
+        spdlog::info("Mesh loaded: {} vertices, {} faces, {} tets", m_positions.rows(), m_triangles.rows(), m_tets.rows());
+    }
+    else {
+        spdlog::info("Mesh loaded: {} vertices, {} faces", m_positions.rows(), m_triangles.rows());
+    }
     {
         // Scale Mesh -> 1 x 1 x 1 box.
-        spdlog::info("Scale Mesh -> 1 x 1 x 1 box.");
-        double len = std::max({ m_positions.col(0).maxCoeff() - m_positions.col(0).minCoeff(),
-            m_positions.col(1).maxCoeff() - m_positions.col(1).minCoeff(),
-            m_positions.col(2).maxCoeff() - m_positions.col(2).minCoeff() });
-        double factor = 1.0 / len;
-        m_positions *= factor;
+        // spdlog::info("Scale Mesh -> 1 x 1 x 1 box.");
+        // double len = std::max({ m_positions.col(0).maxCoeff() - m_positions.col(0).minCoeff(),
+        //     m_positions.col(1).maxCoeff() - m_positions.col(1).minCoeff(),
+        //     m_positions.col(2).maxCoeff() - m_positions.col(2).minCoeff() });
+        // double factor = 1.0 / len;
+        // m_positions *= factor;
 
         // Move Mesh - Make sure Y coordinate > 0
         auto miY = m_positions.col(1).minCoeff() - g_InteractState.dHat;
@@ -93,7 +115,7 @@ TetMesh::TetMesh(std::string meshURL)
         }
     }
 
-    { // Tetrahedralize
+    if (!isTet) { // Tetrahedralize
         std::string args = "pY";
         spdlog::info("TetGen args: -{}", args);
         Eigen::Matrix<double, -1, 3> V, TV;
@@ -112,6 +134,7 @@ TetMesh::TetMesh(std::string meshURL)
         }
         m_positions = TV.cast<PDScalar>();
         m_triangles = TF.cast<PDIndex>();
+        isTet = true;
         spdlog::info("TetrahedralizeMesh successful! {} vertices, {} faces, {} tets", m_positions.rows(), m_triangles.rows(), m_tets.rows());
     }
 
@@ -206,35 +229,40 @@ void TetMesh::InitTetConstraints(PDScalar mu, PDScalar lambda)
         m_vertexMasses.setZero(m_positions.rows());
         auto& pos = m_positions;
         auto& tet = m_tets;
+        double total_volume = 0;
         PD_PARALLEL_FOR
         for (int tInd = 0; tInd < m_tets.rows(); tInd++) {
             Eigen::Matrix<PDScalar, 3, 3> edges;
             edges.col(0) = pos.row(tet(tInd, 1)) - pos.row(tet(tInd, 0));
             edges.col(1) = pos.row(tet(tInd, 2)) - pos.row(tet(tInd, 0));
             edges.col(2) = pos.row(tet(tInd, 3)) - pos.row(tet(tInd, 0));
-            double vol = std::abs(edges.determinant()) / 6.0;
-            vol /= 4.0;
+            double vol = 1.0 / 6.0 * std::abs(edges.determinant());
+            {
+                PD_PARALLEL_ATOMIC
+                total_volume += vol;
+            }
 
             for (int k = 0; k < 4; k++) {
                 PD_PARALLEL_ATOMIC
-                m_vertexMasses(tet(tInd, k), 0) += vol;
+                m_vertexMasses(tet(tInd, k), 0) += 0.25 * vol;
             }
         }
         spdlog::info(">>> TetMesh - TetMesh::InitTetConstraints() - After Get vertex masses");
+        // Normalize vertex masses to integrate to 1 for numerical reasons
+        m_normalizationMass = 1.0 / total_volume;
+        spdlog::info("Total volume: {}, Normalize vertex mass: {}", total_volume, m_normalizationMass);
+        m_vertexMasses *= m_normalizationMass * g_InteractState.hrpdParams.massPerUnitArea;
         PD_PARALLEL_FOR
         for (int vInd = 0; vInd < m_positions.rows(); vInd++) {
-            m_vertexMasses(vInd, 0) = std::max(m_vertexMasses(vInd, 0), PDScalar(PD_MIN_MASS));
+            if (std::abs(m_vertexMasses(vInd, 0)) < PD_MIN_MASS) {
+                m_vertexMasses(vInd, 0) = PD_MIN_MASS;
+            }
         }
-        double totalMass = m_vertexMasses.sum();
-        // Normalize vertex masses to integrate to 1 for numerical reasons
-        m_normalizationMass = 1.0 / totalMass;
-        spdlog::info("Normalize vertex mass: {}", m_normalizationMass);
-        m_vertexMasses *= m_normalizationMass * g_InteractState.hrpdParams.massPerUnitArea;
 
+        spdlog::info("m_system_dim = {}, m_vertexMasses length = {}", m_system_dim, m_vertexMasses.rows());
         // -- Get mass matrix
         std::vector<PDSparseMatrixTriplet> massTris(m_system_dim);
         std::vector<PDSparseMatrixTriplet> massInvTris(m_system_dim);
-        spdlog::info("m_system_dim = {}, m_vertexMasses length = {}", m_system_dim, m_vertexMasses.rows());
         PD_PARALLEL_FOR
         for (int v = 0; v < m_system_dim; v++) {
             massTris[v] = { v, v, m_vertexMasses(v / 3, 0) };
@@ -271,40 +299,99 @@ void TetMesh::InitTetConstraints(PDScalar mu, PDScalar lambda)
         m_Ws[tInd] = 1.0 / 6.0 * std::abs(m_DmInvs[tInd].determinant());
     }
 
+    {
+        std::ofstream f;
+        f.open("./debug/NT/mesh_info");
+        f << fmt::format("V nums = {}, Tet nums = {}\n", m_positions.rows(), m_tets.rows());
+        for (int i = 0; i < m_positions.rows(); i++) {
+            f << fmt::format("V {}: ", i);
+            f << m_positions.row(i);
+            f << "\n";
+        }
+        for (int i = 0; i < m_tets.rows(); i++) {
+            f << fmt::format("Tet {}: ", i);
+            f << m_tets.row(i);
+            f << "\n";
+        }
+        f.close();
+
+        f.open("./debug/NT/mass_vec");
+        f << fmt::format("Size = ({}, {})\n", m_vertexMasses.rows(), m_vertexMasses.cols());
+        f << m_vertexMasses;
+        f.close();
+    }
+
     spdlog::info(">>> TetMesh - After TetMesh::InitTetConstraints()");
 }
 
-void TetMesh::EvalEnergy(Eigen::Matrix<PDScalar, -1, 3>& pos)
+void TetMesh::EvalEnergy(const Eigen::Matrix<PDScalar, -1, 1>& pos_vec)
 {
     m_E = 0;
     m_Es.resize(m_tets.rows());
     PD_PARALLEL_FOR
     for (int tInd = 0; tInd < m_tets.rows(); tInd++) {
-        m_Es(tInd) = Get_element_energy(tInd, pos);
+        m_Es(tInd) = Get_element_energy(tInd, pos_vec);
     }
     m_E = m_Es.sum();
 
     // spdlog::info(">>> TetMesh - After TetMesh::EvalEnergy()");
 }
 
-void TetMesh::EvalGradient(Eigen::Matrix<PDScalar, -1, 3>& pos)
+void TetMesh::EvalGradient(const Eigen::Matrix<PDScalar, -1, 1>& pos_vec)
 {
     m_Grad.setZero(m_positions.rows() * 3);
-    PD_PARALLEL_FOR
+    static int timestep = 0;
+
+    // PD_PARALLEL_FOR
     for (int tInd = 0; tInd < m_tets.rows(); tInd++) {
-        Eigen::Matrix<PDScalar, 9, 12> vec_dF_dx = Get_vec_dF_dx(tInd, pos);
-        Eigen::Matrix<PDScalar, 9, 1> vec_dPhi_dF = Get_vec_dPhi_dF(tInd, pos);
+        Eigen::Matrix<PDScalar, 9, 12> vec_dF_dx = Get_vec_dF_dx(tInd, pos_vec);
+        Eigen::Matrix<PDScalar, 9, 1> vec_dPhi_dF = Get_vec_dPhi_dF(tInd, pos_vec); // P
         Eigen::Matrix<PDScalar, 12, 1> grad = vec_dF_dx.transpose() * vec_dPhi_dF;
 
+        {
+            static int P_tet_ct = 0;
+            std::ofstream f;
+            f.open("./debug/NT/P/" + std::to_string(timestep) + "_tet_" + std::to_string(P_tet_ct));
+            f << vec_dPhi_dF;
+            f.close();
+
+            P_tet_ct++;
+            if (P_tet_ct == 6) P_tet_ct = 0;
+        }
+
+        {
+            static bool flag = true;
+            if (flag) {
+                flag = false;
+
+                std::cout << "====================================>m_DmInvs[tInd]\n";
+                std::cout << m_DmInvs[tInd] << "\n";
+                std::cout << "====================================>\n";
+
+                std::cout << "====================================>dF_dx\n";
+                std::cout << vec_dF_dx << "\n";
+                std::cout << "====================================>\n";
+
+                std::cout << "====================================>dPhi_dF\n";
+                std::cout << vec_dPhi_dF << "\n";
+                std::cout << "====================================>\n";
+
+                std::cout << "====================================>grad\n";
+                std::cout << grad << "\n";
+                std::cout << "====================================>\n";
+            }
+        }
+
         for (int i = 0; i < 12; i++) {
-            PD_PARALLEL_ATOMIC
+            // PD_PARALLEL_ATOMIC
             m_Grad(m_tets(tInd, i / 3) + i % 3) += grad(i);
         }
     }
+    timestep++;
     spdlog::info(">>> TetMesh - After TetMesh::EvalGradient()");
 }
 
-void TetMesh::EvalHessian(Eigen::Matrix<PDScalar, -1, 3>& pos, bool definitness_fix)
+void TetMesh::EvalHessian(const Eigen::Matrix<PDScalar, -1, 1>& pos_vec, bool definitness_fix)
 {
     std::vector<PDSparseMatrixTriplet> tris(m_tets.rows() * 12 * 12);
     int tris_idx = 0;
@@ -312,9 +399,9 @@ void TetMesh::EvalHessian(Eigen::Matrix<PDScalar, -1, 3>& pos, bool definitness_
     PD_PARALLEL_FOR
     for (int tInd = 0; tInd < m_tets.rows(); tInd++) {
         // spdlog::info(">>> TetMesh - TetMesh::EvalHessian() - tInd = {}", tInd);
-        Eigen::Matrix<PDScalar, 9, 12> vec_dF_dx = Get_vec_dF_dx(tInd, pos);
+        Eigen::Matrix<PDScalar, 9, 12> vec_dF_dx = Get_vec_dF_dx(tInd, pos_vec);
         // spdlog::info(">>> TetMesh - TetMesh::EvalHessian() - tInd = {} vec_dF_dx ok.", tInd);
-        Eigen::Matrix<PDScalar, 9, 9> vec_d2Phi_dF2 = Get_vec_d2Phi_dF2(tInd, pos);
+        Eigen::Matrix<PDScalar, 9, 9> vec_d2Phi_dF2 = Get_vec_d2Phi_dF2(tInd, pos_vec);
         // spdlog::info(">>> TetMesh - TetMesh::EvalHessian() - tInd = {} vec_d2Phi_dF2 ok.", tInd);
         Eigen::Matrix<PDScalar, 12, 12> Hessian = vec_dF_dx.transpose() * vec_d2Phi_dF2 * vec_dF_dx;
         // spdlog::info(">>> TetMesh - TetMesh::EvalHessian() - tInd = {} Hessian ok.", tInd);
@@ -367,23 +454,38 @@ void TetMesh::full_to_reduced(Eigen::Matrix<PDScalar, -1, 3>& reduced, Eigen::Ma
     }
 }
 
-Eigen::Matrix<PDScalar, 3, 3> TetMesh::Get_deformation_gradient(int tInd, Eigen::Matrix<PDScalar, -1, 3>& pos)
+Eigen::Matrix<PDScalar, 3, 3> TetMesh::Get_deformation_gradient(int tInd, const Eigen::Matrix<PDScalar, -1, 1>& pos_vec)
 {
     Eigen::Matrix<PDScalar, 3, 3> F;
     int v0 = m_tets(tInd, 0);
     int v1 = m_tets(tInd, 1);
     int v2 = m_tets(tInd, 2);
     int v3 = m_tets(tInd, 3);
-    F.col(0) = pos.row(v1) - pos.row(v0);
-    F.col(1) = pos.row(v2) - pos.row(v0);
-    F.col(2) = pos.row(v3) - pos.row(v0);
+    F.col(0) = pos_vec.block_vector(v1) - pos_vec.block_vector(v0);
+    F.col(1) = pos_vec.block_vector(v2) - pos_vec.block_vector(v0);
+    F.col(2) = pos_vec.block_vector(v3) - pos_vec.block_vector(v0);
     F *= m_DmInvs[tInd];
+
+    {
+        // spdlog::info("=============== POS ===============");
+        // std::cout << m_positions << "\n";
+        // spdlog::info("=============== POS ===============");
+        // std::cout << pos_vec << "\n";
+        // spdlog::info("=============== POS ===============");
+        // for (int i = 0; i < 4; i++) {
+        //     std::cout << pos_vec.block_vector(m_tets(tInd,i)) << "\n";
+        // }
+
+        // spdlog::info("=============== F ===============");
+        // std::cout << F << "\n";
+    }
+
     return F;
 }
 
-PDScalar TetMesh::Get_element_energy(int tInd, Eigen::Matrix<PDScalar, -1, 3>& pos)
+PDScalar TetMesh::Get_element_energy(int tInd, const Eigen::Matrix<PDScalar, -1, 1>& pos_vec)
 {
-    EigenMatrix3 F = Get_deformation_gradient(tInd, pos);
+    EigenMatrix3 F = Get_deformation_gradient(tInd, pos_vec);
 
     PDScalar e_this = 0;
     switch (m_material_type) {
@@ -449,7 +551,7 @@ PDScalar TetMesh::Get_element_energy(int tInd, Eigen::Matrix<PDScalar, -1, 3>& p
     return e_this;
 }
 
-Eigen::Matrix<PDScalar, 9, 12> TetMesh::Get_vec_dF_dx(int tInd, Eigen::Matrix<PDScalar, -1, 3>& pos)
+Eigen::Matrix<PDScalar, 9, 12> TetMesh::Get_vec_dF_dx(int tInd, const Eigen::Matrix<PDScalar, -1, 1>& pos_vec)
 {
     Eigen::Matrix<PDScalar, 9, 12> vec_dF_dx = Eigen::Matrix<PDScalar, 9, 12>::Zero();
     auto& DmInv = m_DmInvs[tInd];
@@ -477,43 +579,75 @@ Eigen::Matrix<PDScalar, 9, 12> TetMesh::Get_vec_dF_dx(int tInd, Eigen::Matrix<PD
     return vec_dF_dx;
 }
 
-Eigen::Matrix<PDScalar, 9, 1> TetMesh::Get_vec_dPhi_dF(int tInd, Eigen::Matrix<PDScalar, -1, 3>& pos)
+Eigen::Matrix<PDScalar, 9, 1> TetMesh::Get_vec_dPhi_dF(int tInd, const Eigen::Matrix<PDScalar, -1, 1>& pos_vec)
 {
     Eigen::Matrix<PDScalar, 9, 1> vec_dPhi_dF = Eigen::Matrix<PDScalar, 9, 1>::Zero();
-    Eigen::Matrix<PDScalar, 3, 3> F = Get_deformation_gradient(tInd, pos);
+    Eigen::Matrix<PDScalar, 3, 3> F = Get_deformation_gradient(tInd, pos_vec);
 
     if (m_material_type == MATERIAL_TYPE::MATERIAL_TYPE_NEOHOOKEAN) {
-        PDScalar J = F.determinant();
-        PDScalar logJ = std::log(J);
-        Eigen::Matrix<PDScalar, 3, 1> f0 = F.col(0);
-        Eigen::Matrix<PDScalar, 3, 1> f1 = F.col(1);
-        Eigen::Matrix<PDScalar, 3, 1> f2 = F.col(2);
+        spdlog::info(">>> MATERIAL_TYPE::MATERIAL_TYPE_NEOHOOKEAN Eval...");
+        // PDScalar J = F.determinant();
+        // PDScalar logJ = std::log(J);
+        // Eigen::Matrix<PDScalar, 3, 1> f0 = F.col(0);
+        // Eigen::Matrix<PDScalar, 3, 1> f1 = F.col(1);
+        // Eigen::Matrix<PDScalar, 3, 1> f2 = F.col(2);
 
-        auto _cross = [](Eigen::Matrix<PDScalar, 3, 1>& x, Eigen::Matrix<PDScalar, 3, 1>& y) {
-            Eigen::Matrix<PDScalar, 3, 1> z;
-            z.setZero();
-            z(0) = x(1) * y(2) - x(2) * y(1);
-            z(1) = x(2) * y(0) - x(0) * y(2);
-            z(2) = x(0) * y(1) - x(1) * y(0);
-            return z;
-        };
+        // auto _cross = [](Eigen::Matrix<PDScalar, 3, 1>& x, Eigen::Matrix<PDScalar, 3, 1>& y) {
+        //     Eigen::Matrix<PDScalar, 3, 1> z;
+        //     z.setZero();
+        //     z(0) = x(1) * y(2) - x(2) * y(1);
+        //     z(1) = x(2) * y(0) - x(0) * y(2);
+        //     z(2) = x(0) * y(1) - x(1) * y(0);
+        //     return z;
+        // };
 
-        Eigen::Matrix<PDScalar, 3, 3> dJ_dF;
-        dJ_dF.col(0) = _cross(f1, f2);
-        dJ_dF.col(1) = _cross(f2, f0);
-        dJ_dF.col(2) = _cross(f0, f1);
+        // Eigen::Matrix<PDScalar, 3, 3> dJ_dF;
+        // dJ_dF.col(0) = _cross(f1, f2);
+        // dJ_dF.col(1) = _cross(f2, f0);
+        // dJ_dF.col(2) = _cross(f0, f1);
 
-        Eigen::Matrix<PDScalar, 3, 3> dPhi_dF = m_mu * F - (m_mu / J) * dJ_dF + (m_lambda * logJ) / J * dJ_dF;
-        vec_dPhi_dF = Eigen::Map<const Eigen::Matrix<PDScalar, 9, 1>>(dPhi_dF.data(), dPhi_dF.size());
+        // Eigen::Matrix<PDScalar, 3, 3> dPhi_dF = m_mu * F - (m_mu / J) * dJ_dF + (m_lambda * logJ) / J * dJ_dF;
+        // vec_dPhi_dF = Eigen::Map<const Eigen::Matrix<PDScalar, 9, 1>>(dPhi_dF.data(), dPhi_dF.size());
+
+        // {
+            PDScalar J = F.determinant();
+
+            EigenMatrix3 P = m_mu * F;
+            PDScalar logJ;
+            const PDScalar& J0 = m_neohookean_clamp_value;
+            if (J > J0) {
+                logJ = std::log(J);
+                EigenMatrix3 FinvT = F.inverse().transpose(); // F is invertible because J > 0
+                P += m_mu * (-FinvT) + m_lambda * logJ * FinvT;
+            }
+            else {
+                PDScalar fJ = log(J0) + (J - J0) / J0 - 0.5 * std::pow((J / J0 - 1), 2);
+                PDScalar dfJdJ = 1.0 / J0 - (J - J0) / (J0 * J0);
+                // PDScalar fJ = log(J);
+                // PDScalar dfJdJ = 1 / J;
+                EigenMatrix3 FinvT = F.inverse().transpose(); // TODO: here F is nolonger guaranteed to be invertible....
+                P += -m_mu * dfJdJ * J * FinvT + m_lambda * fJ * dfJdJ * J * FinvT;
+            }
+            vec_dPhi_dF = Eigen::Map<const Eigen::Matrix<PDScalar, 9, 1>>(P.data(), P.size());
+        // }
+
+        {
+            // spdlog::info(">>> J = {}, logJ = {}", J, logJ);
+            // spdlog::info("============= dJ_dF =============");
+            // std::cout << dJ_dF << "\n";
+            // spdlog::info("============= dPhi_dF =============");
+            // std::cout << dPhi_dF << "\n";
+            // system("pause");
+        }
     }
 
     return vec_dPhi_dF;
 }
 
-Eigen::Matrix<PDScalar, 9, 9> TetMesh::Get_vec_d2Phi_dF2(int tInd, Eigen::Matrix<PDScalar, -1, 3>& pos)
+Eigen::Matrix<PDScalar, 9, 9> TetMesh::Get_vec_d2Phi_dF2(int tInd, const Eigen::Matrix<PDScalar, -1, 1>& pos_vec)
 {
     Eigen::Matrix<PDScalar, 9, 9> vec_d2Phi_dF2 = Eigen::Matrix<PDScalar, 9, 9>::Zero();
-    Eigen::Matrix<PDScalar, 3, 3> F = Get_deformation_gradient(tInd, pos);
+    Eigen::Matrix<PDScalar, 3, 3> F = Get_deformation_gradient(tInd, pos_vec);
 
     if (m_material_type == MATERIAL_TYPE::MATERIAL_TYPE_NEOHOOKEAN) {
         PDScalar J = F.determinant();
@@ -758,6 +892,19 @@ void TetMesh::IGL_SetMesh(igl::opengl::glfw::Viewer* viewer, Eigen::MatrixXd col
     // spdlog::info(">>> TetMesh::IGL_SetMesh() - After");
 }
 
+// ============================================================================================================
+
+static void TestGradient()
+{
+    PDPositions rpos, pos;
+    rpos.resize(4, 3);
+    pos.resize(4, 3);
+
+    // rpos.row(0) << ;
+    // rpos.row(1) << ;
+    // rpos.row(2) << ;
+    // rpos.row(3) << ;
 }
 
+}
 }

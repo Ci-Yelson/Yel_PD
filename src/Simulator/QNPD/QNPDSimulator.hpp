@@ -89,7 +89,7 @@ struct QNPDSimulator : public PDSimulator {
     } m_lbfgs;
 
     struct LS { // line search
-        bool enable_line_search{ true };
+        bool enable_line_search{ false };
         bool enable_exact_search{ false };
         PDScalar alpha{ 0.03 }, beta{ 0.5 };
         PDScalar step_size{ 1.0 };
@@ -109,7 +109,8 @@ struct QNPDSimulator : public PDSimulator {
     PDScalar m_damping_coefficient{ 0.001 };
 
     IntegrationMethod m_integration_method = INTEGRATION_IMPLICIT_EULER;
-    OptimizationMethod m_optimization_method = OPTIMIZATION_METHOD_LBFGS;
+    // OptimizationMethod m_optimization_method = OPTIMIZATION_METHOD_LBFGS;
+    OptimizationMethod m_optimization_method = OPTIMIZATION_METHOD_NEWTON;
     SolverType m_solver_type{ SOLVER_TYPE_DIRECT_LLT };
     int m_iterative_solver_max_iteration{ 10 };
 
@@ -118,10 +119,10 @@ struct QNPDSimulator : public PDSimulator {
 
     MaterialType m_material_type{ MATERIAL_TYPE_NEOHOOKEAN_EXTEND_LOG };
     PDScalar m_stiffness_attachment{ 120 };
-    PDScalar m_stiffness_stretch{ 80 };
+    PDScalar m_stiffness_stretch{ 80 }; // mu
     // PDScalar m_stiffness_high{20};
-    PDScalar m_stiffness_bending{ 20 };
-    PDScalar m_stiffness_kappa{ 100 };
+    PDScalar m_stiffness_bending{ 20 }; // lambda
+    PDScalar m_stiffness_kappa{ 100 };  // kappa
     PDScalar m_stiffness_laplacian{ 2 * m_stiffness_stretch + m_stiffness_bending };
     bool m_stiffness_auto_laplacian_stiffness{ true };
 

@@ -1,5 +1,7 @@
 #include "QNPDTetMesh.hpp"
+#include "Simulator/PDTypeDef.hpp"
 #include "UI/InteractState.hpp"
+#include "Util/MeshIO.hpp"
 #include "Util/StoreData.hpp"
 
 #include <Eigen/src/Core/Map.h>
@@ -60,9 +62,26 @@ QNPDTetMesh::QNPDTetMesh(std::string meshURL)
             m_positions = V.cast<PDScalar>();
             m_triangles = F.cast<PDIndex>();
         }
+        else if (fileSuffix == "msh") {
+            Eigen::MatrixXd TV;
+            Eigen::MatrixXi TT, TF;
+            if (!Util::readTetMesh(meshURL, TV, TT, TF)) {
+                spdlog::error("Failed to read {}", meshURL);
+                exit(1);
+            }
+            m_positions = TV.cast<PDScalar>();
+            m_tets = TT.cast<PDIndex>();
+            m_triangles = TF.cast<PDIndex>();
+            isTet = true;
+        }
         m_restpose_positions = m_positions;
 
-        spdlog::info("Mesh loaded: {} vertices, {} faces", m_positions.rows(), m_triangles.rows());
+        if (isTet) {
+            spdlog::info("Mesh loaded: {} vertices, {} faces, {} tets", m_positions.rows(), m_triangles.rows(), m_tets.rows());
+        }
+        else {
+            spdlog::info("Mesh loaded: {} vertices, {} faces", m_positions.rows(), m_triangles.rows());
+        }
     }
 
     {
@@ -86,7 +105,7 @@ QNPDTetMesh::QNPDTetMesh(std::string meshURL)
         Util::storeData(m_positions, m_triangles, "./debug/mesh.obj", true);
     }
 
-    { // Tetrahedralize
+    if (!isTet) { // Tetrahedralize
         std::string args = "p";
         spdlog::info("TetGen args: -{}", args);
         Eigen::Matrix<double, -1, 3> V, TV;
@@ -106,7 +125,8 @@ QNPDTetMesh::QNPDTetMesh(std::string meshURL)
         m_positions = TV.cast<PDScalar>();
         m_triangles = TF.cast<PDIndex>();
         m_restpose_positions = m_positions;
-        spdlog::info("TetrahedralizeMesh successful! {} vertices, {} faces", m_positions.rows(), m_triangles.rows());
+        isTet = true;
+        spdlog::info("TetrahedralizeMesh successful! {} vertices, {} faces, {} tets", m_positions.rows(), m_triangles.rows(), m_tets.rows());
     }
 
     { // Mesh params init

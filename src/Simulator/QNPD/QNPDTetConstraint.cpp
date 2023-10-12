@@ -2,6 +2,9 @@
 #include "Simulator/PDTypeDef.hpp"
 #include <cassert>
 
+#include <fstream>
+#include <spdlog/spdlog.h>
+
 #define EPSILON 1e-6
 #define EPSILON_SQUARE 1e-12
 #define LARGER_EPSILON 1e-4
@@ -281,6 +284,17 @@ void QNPDTetConstraint::EvaluateGradient(const PDVector& x, PDVector& gradient)
     EigenMatrix3 R;
     getStressTensor(P, F, R);
 
+    // {
+    //     spdlog::info("QNPDTetConstraint::EvaluateGradient(const PDVector& x, PDVector& gradient)");
+    //     static int timestep = 0;
+    //     std::ofstream f;
+    //     f.open("./debug/QNPD/P/" + std::to_string(timestep) + "_tet_" + std::to_string(P_tet_ct));
+    //     f << P;
+    //     f.close();
+    //     P_tet_ct++;
+    //     if (P_tet_ct == 6) timestep++, P_tet_ct = 0;
+    // }
+
     EigenMatrix3 H = m_W * P * m_Dm_inv.transpose();
 
     EigenVector3 g[4];
@@ -302,6 +316,17 @@ void QNPDTetConstraint::EvaluateGradient(const PDVector& x)
     EigenMatrix3 P;
     EigenMatrix3 R;
     getStressTensor(P, F, R);
+
+    // {
+    //     spdlog::info("QNPDTetConstraint::EvaluateGradient(const PDVector& x)");
+    //     static int timestep = 0;
+    //     std::ofstream f;
+    //     f.open("./debug/QNPD/P/" + std::to_string(timestep) + "_tet_" + std::to_string(P_tet_ct));
+    //     f << P;
+    //     f.close();
+    //     P_tet_ct++;
+    //     if (P_tet_ct == 6) timestep++, P_tet_ct = 0;
+    // }
 
     EigenMatrix3 H = m_W * P * m_Dm_inv.transpose();
 
@@ -355,12 +380,14 @@ PDScalar QNPDTetConstraint::GetEnergyAndGradient(PDVector& gradient)
 
 void QNPDTetConstraint::EvaluateHessian(const PDVector& x, bool definiteness_fix)
 {
+    // spdlog::info(">>> QNPDTetConstraint::EvaluateHessian()");
     EigenMatrix3 F;
     getDeformationGradient(F, x);
 
     Matrix3333 dPdF;
 
     calculateDPDF(dPdF, F);
+    // spdlog::info(">>> QNPDTetConstraint::EvaluateHessian() - After calculateDPDF()");
 
     Matrix3333 dH;
     dH = m_W * dPdF * m_Dm_inv.transpose();
@@ -388,6 +415,7 @@ void QNPDTetConstraint::EvaluateHessian(const PDVector& x, bool definiteness_fix
         // H_blocks[3][j] = -H_blocks[0][j]-H_blocks[1][j]-H_blocks[2][j];
         m_H.block<3, 3>(9, j * 3) = -m_H.block<3, 3>(0, j * 3) - m_H.block<3, 3>(3, j * 3) - m_H.block<3, 3>(6, j * 3);
     }
+    // spdlog::info(">>> QNPDTetConstraint::EvaluateHessian() - After calculate m_H");
 
     if (definiteness_fix) {
         // definiteness fix
@@ -410,6 +438,7 @@ void QNPDTetConstraint::EvaluateHessian(const PDVector& x, bool definiteness_fix
         // evd.compute(m_H);
         // Q = evd.eigenvectors().real();
         // LAMBDA = evd.eigenvalues().real();
+        // spdlog::info(">>> QNPDTetConstraint::EvaluateHessian() - After definiteness_fix");
     }
 }
 
@@ -432,6 +461,7 @@ void QNPDTetConstraint::EvaluateHessian(const PDVector& x, std::vector<PDSparseM
             }
         }
     }
+    // spdlog::info(">>> QNPDTetConstraint::EvaluateHessian() - After set to triplets");
 }
 
 void QNPDTetConstraint::ApplyHessian(const PDVector& x, PDVector& b)
