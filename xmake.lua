@@ -4,12 +4,6 @@ add_requires("spdlog", "glfw", "glad", "glew", "glm", "nlohmann_json")
 add_requires("tetgen 1.6.0", {alias = "tetgen"})
 add_requires("libigl v2.4.0", {alias = "libigl", system = false, configs = {imgui = false}})
 
-option("PD_USE_CUDA")
-    set_default(true) -- 设置默认值为 true
-    set_showmenu(true)
-    set_description("The PD_USE_CUDA config option")
-option_end()
-
 target("Yel_PD")
     set_kind("binary")
     
@@ -44,22 +38,11 @@ target("Yel_PD")
     add_packages("spdlog", "glfw", "glad", "glew", "glm", "nlohmann_json")
     add_packages("tetgen", "libigl")
 
-    -- For cuda
-    if has_config("PD_USE_CUDA") then
-        add_files("src/**.cu")
-        add_cugencodes("native")
-        -- add_cugencodes("compute_61")
-        -- add_cugencodes("compute_75")
-        -- 链接 CUDA 库
-        add_links("cudart", "cublas", "cusparse")
-        -- 添加编译定义
-        add_defines("PD_USE_CUDA")
-    end
-
 
 -- Config for windows: xmake f -p windows -a x64 -m release --cc=clang-cl --cxx=clang-cl
 -- Config for commands_json: xmake project -k compile_commands
 -- Check cuda: xmake l detect.sdks.find_cuda
+-- Config cuda: $ xmake f --cuda=/usr/local/cuda-9.1/ or $ xmake g --cuda=/usr/local/cuda-9.1/  
 
 --
 -- If you want to known more usage about xmake, please see https://xmake.io

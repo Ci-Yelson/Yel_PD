@@ -8,7 +8,10 @@
 #include "Simulator/HRPD/HRPDSimulator.hpp"
 #include "Simulator/HRPD/HRPDSubspaceBuilder.hpp"
 #include "Simulator/PDTypeDef.hpp"
+
+#ifdef PD_USE_CUDA
 #include "Simulator/HRPD/CUDA/CUDAMatrixOP.hpp"
+#endif
 
 #include "UI/InteractState.hpp"
 #include "Util/Profiler.hpp"

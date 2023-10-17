@@ -60,13 +60,13 @@ public:
 
     ~PDViewer()
     {
-        m_imguiContext->end();
+        // m_imguiContext->end();
     }
 
     // Config gravity and floor
     void Setup();
     void Reset();
-    
+
 public:
     void init(igl::opengl::glfw::Viewer* _viewer) override
     {
