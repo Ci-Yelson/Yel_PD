@@ -47,7 +47,7 @@ int main(int argc, char** argv)
     g_Viewer.core().animation_max_fps = 30;
     g_Viewer.core().background_color << 100. / 255, 100. / 255, 100. / 255, 1.0;
 
-    g_Viewer.launch_init(true, false, "PD Viewer");
+    g_Viewer.launch_init(true, false, "CAD Simulator");
 
     {
         g_Gizmo.init(&g_Viewer, nullptr);

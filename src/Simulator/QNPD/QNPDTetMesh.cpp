@@ -87,12 +87,12 @@ QNPDTetMesh::QNPDTetMesh(std::string meshURL)
     {
         // TODO: UNSTABLE?
         // Scale Mesh -> 1 x 1 x 1 box.
-        // spdlog::info("Scale Mesh -> 1 x 1 x 1 box.");
-        // double len = std::max({ m_positions.col(0).maxCoeff() - m_positions.col(0).minCoeff(),
-        //     m_positions.col(1).maxCoeff() - m_positions.col(1).minCoeff(),
-        //     m_positions.col(2).maxCoeff() - m_positions.col(2).minCoeff() });
-        // double factor = 1.0 / len;
-        // m_positions *= factor;
+        spdlog::info("Scale Mesh -> 1 x 1 x 1 box.");
+        double len = std::max({ m_positions.col(0).maxCoeff() - m_positions.col(0).minCoeff(),
+            m_positions.col(1).maxCoeff() - m_positions.col(1).minCoeff(),
+            m_positions.col(2).maxCoeff() - m_positions.col(2).minCoeff() });
+        double factor = 1.0 / len;
+        m_positions *= factor;
 
         // Move Mesh - Make sure Y coordinate > 0
         auto miY = m_positions.col(1).minCoeff() - g_InteractState.dHat;

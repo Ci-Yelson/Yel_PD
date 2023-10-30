@@ -196,7 +196,7 @@ void PDViewer::Setup()
             spdlog::info("> PDViewer::setup - m_floorMeshID = {}", m_floorMeshID);
         }
         double gridSize = m_floorGridSize;
-        double step = gridSize / 25;
+        double step = gridSize / 5;
         Eigen::RowVector3d C;
         for (double f = -gridSize; f <= gridSize; f += step) {
             double y = 0.;

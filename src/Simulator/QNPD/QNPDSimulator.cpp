@@ -58,11 +58,11 @@ void QNPDSimulator::LoadParamsAndApply()
         spdlog::warn("MATERIAL [{}] NOT FOUND - USE DEFAULT: MATERIAL_TYPE_StVK", g_InteractState.qnpdParams.materialType);
         m_material_type = MATERIAL_TYPE_StVK;
     }
-    m_stiffness_attachment = qnpdParams.stiffness_attachment;
-    m_stiffness_stretch = qnpdParams.stiffness_stretch;
-    m_stiffness_bending = qnpdParams.stiffness_bending;
-    m_stiffness_kappa = qnpdParams.stiffness_kappa;
-    m_stiffness_laplacian = qnpdParams.stiffness_laplacian;
+    m_stiffness_attachment = qnpdParams.stiffness_attachment * 100;
+    m_stiffness_stretch = qnpdParams.stiffness_stretch * 100;
+    m_stiffness_bending = qnpdParams.stiffness_bending * 100;
+    m_stiffness_kappa = qnpdParams.stiffness_kappa * 100;
+    m_stiffness_laplacian = qnpdParams.stiffness_laplacian * 100;
     m_damping_coefficient = qnpdParams.damping_coefficient;
 
     m_lbfgs.m = qnpdParams.lbfgs_m;
@@ -168,14 +168,14 @@ void QNPDSimulator::Step()
     // spdlog::info(">>> m_cur_positions size = ({}, {})", m_cur_positions.rows(), m_cur_positions.cols());
 
     {
-        static int timestep = 0;
-        std::ofstream f;
-        f.open("./debug/QNPD/m_y/" + std::to_string(timestep));
-        f << m_y;
-        f.close();
-        
-        Util::storeData(m_mesh->m_positions, m_mesh->m_triangles, "./debug/QNPD/objs/" + std::to_string(timestep) + ".obj", true);
-        timestep++;
+        // static int timestep = 0;
+        // std::ofstream f;
+        // f.open("./debug/QNPD/m_y/" + std::to_string(timestep));
+        // f << m_y;
+        // f.close();
+
+        // Util::storeData(m_mesh->m_positions, m_mesh->m_triangles, "./debug/QNPD/objs/" + std::to_string(timestep) + ".obj", true);
+        // timestep++;
     }
 
     m_dt = old_h;

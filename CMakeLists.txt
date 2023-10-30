@@ -13,7 +13,7 @@ if(CCACHE_PROGRAM)
 endif()
 
 ##################################################################
-set(PD_USE_CUDA ON CACHE BOOL "Enable CUDA" FORCE)
+set(PD_USE_CUDA OFF CACHE BOOL "Enable CUDA" FORCE)
 ##################################################################
 
 if (PD_USE_CUDA)
@@ -34,7 +34,7 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -w")
 add_compile_definitions(EIGEN_DONT_PARALLELIZE)
 
 add_executable(${PROJECT_NAME})
-file(GLOB_RECURSE SRC_FILES CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/src/*)
+file(GLOB_RECURSE SRC_FILES CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/src/*.cpp)
 target_sources(${PROJECT_NAME} PUBLIC ${SRC_FILES})
 target_include_directories(${PROJECT_NAME} PUBLIC ${PROJECT_SOURCE_DIR}/src)
 
@@ -44,6 +44,7 @@ list(PREPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
 find_package(libigl REQUIRED)
 igl_include(glfw)
 igl_include(copyleft tetgen)
+igl_include(png)
 target_link_libraries(${PROJECT_NAME} PUBLIC igl::glfw igl_copyleft::tetgen igl::png)
 target_compile_definitions(${PROJECT_NAME} PUBLIC IGL_VIEWER_VIEWER_QUIET)
 # Add libs/ : imgui_docking, imguizmo
@@ -74,6 +75,10 @@ target_link_libraries(${PROJECT_NAME} PUBLIC nlohmann_json::nlohmann_json)
 # ghc filesystem
 find_package(filesystem REQUIRED)
 target_link_libraries(${PROJECT_NAME} PUBLIC ghc::filesystem)
+
+# boost
+find_package(boost REQUIRED)
+target_link_libraries(${PROJECT_NAME} PUBLIC Boost::boost)
 
 # mshio
 find_package(mshio REQUIRED)

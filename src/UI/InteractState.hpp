@@ -146,6 +146,22 @@ struct InteractState {
             hrpdParams.sigmaMin = data["sigmaMin"].get<double>();
         }
         // ...
+
+        if (simulatorType == "QNPD") {
+            if (data.contains("QNPDParams")) {
+                nlohmann::json j = data.at("QNPDParams").get<nlohmann::json>();
+                auto& params = qnpdParams;
+                params.stiffness_attachment = j.at("stiffness_attachment").get<double>();
+                params.stiffness_stretch = j.at("stiffness_stretch").get<double>();
+                params.stiffness_bending = j.at("stiffness_bending").get<double>();
+                params.stiffness_kappa = j.at("stiffness_kappa").get<double>();
+
+                params.gravityConstant = j.at("gravityConstant").get<double>();
+
+                params.ls_enable_line_search = j.at("ls_enable_line_search").get<bool>();
+            }
+        }
+
         spdlog::info(">>> After load file: {}", filepath);
     }
 };
