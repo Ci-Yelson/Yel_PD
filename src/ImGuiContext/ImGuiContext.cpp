@@ -9,6 +9,44 @@
 #include <spdlog/spdlog.h>
 
 namespace PD {
+
+inline void SetupImGuiStyle(bool bStyleDark_, float alpha_)
+{
+    // clang-format off
+    ImGuiStyle& style = ImGui::GetStyle();
+
+    if( bStyleDark_ )
+    {
+        ImGui::StyleColorsDark();
+    }
+    else
+    {
+        ImGui::StyleColorsLight();
+    }
+
+    for (int i = 0; i <= ImGuiCol_COUNT; i++)
+    {
+        ImGuiCol_ ei = (ImGuiCol_)i;
+        ImVec4& col = style.Colors[i];
+        if(  (ImGuiCol_ModalWindowDimBg  != ei ) &&
+            ( ImGuiCol_NavWindowingDimBg != ei ) &&
+            ( col.w < 1.00f || ( ImGuiCol_FrameBg  == ei )
+                            || ( ImGuiCol_WindowBg == ei ) 
+                            || ( ImGuiCol_ChildBg  == ei ) ) )
+        {
+            col.w = alpha_ * col.w;
+        }
+    }
+    
+    style.ChildBorderSize = 1.0f;
+    style.FrameBorderSize = 0.0f;
+    style.PopupBorderSize = 1.0f;
+    style.WindowBorderSize = 0.0f;
+    style.FrameRounding = 3.0f;
+    style.Alpha = 1.0f;
+    // clang-format on
+}
+
 bool ImGuiContext::init(GLFWwindow* window)
 {
     // Setup Dear ImGui context
@@ -21,40 +59,42 @@ bool ImGuiContext::init(GLFWwindow* window)
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable; // Enable Docking
     io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable; // Enable Multi-Viewport / Platform Windows
 
-    {
-        // clang-format off
-        auto& colors = ImGui::GetStyle().Colors;
-        colors[ImGuiCol_WindowBg] = ImVec4{ 0.1f, 0.1f, 0.1f, 1.0f };
+    // {
+    //     // clang-format off
+    //     auto& colors = ImGui::GetStyle().Colors;
+    //     colors[ImGuiCol_WindowBg] = ImVec4{ 0.1f, 0.1f, 0.1f, 1.0f };
 
-        colors[ImGuiCol_Header] = ImVec4{ 0.2f, 0.2f, 0.2f, 1.0f };
-        colors[ImGuiCol_HeaderHovered] = ImVec4{ 0.3f, 0.3f, 0.3f, 1.0f };
-        colors[ImGuiCol_HeaderActive] = ImVec4{ 0.15f, 0.15f, 0.15f, 1.0f };
+    //     colors[ImGuiCol_Header] = ImVec4{ 0.2f, 0.2f, 0.2f, 1.0f };
+    //     colors[ImGuiCol_HeaderHovered] = ImVec4{ 0.3f, 0.3f, 0.3f, 1.0f };
+    //     colors[ImGuiCol_HeaderActive] = ImVec4{ 0.15f, 0.15f, 0.15f, 1.0f };
 
-        colors[ImGuiCol_Button] = ImVec4{ 0.2f, 0.2f, 0.2f, 1.0f };
-        colors[ImGuiCol_ButtonHovered] = ImVec4{ 0.3f, 0.3f, 0.3f, 1.0f };
-        colors[ImGuiCol_ButtonActive] = ImVec4{ 0.15f, 0.15f, 0.15f, 1.0f };
+    //     colors[ImGuiCol_Button] = ImVec4{ 0.2f, 0.2f, 0.2f, 1.0f };
+    //     colors[ImGuiCol_ButtonHovered] = ImVec4{ 0.3f, 0.3f, 0.3f, 1.0f };
+    //     colors[ImGuiCol_ButtonActive] = ImVec4{ 0.15f, 0.15f, 0.15f, 1.0f };
 
-        colors[ImGuiCol_FrameBg] = ImVec4{ 0.2f, 0.2f, 0.2f, 1.0f };
-        colors[ImGuiCol_FrameBgHovered] = ImVec4{ 0.3f, 0.3f, 0.3f, 1.0f };
-        colors[ImGuiCol_FrameBgActive] = ImVec4{ 0.15f, 0.15f, 0.15f, 1.0f };
+    //     colors[ImGuiCol_FrameBg] = ImVec4{ 0.2f, 0.2f, 0.2f, 1.0f };
+    //     colors[ImGuiCol_FrameBgHovered] = ImVec4{ 0.3f, 0.3f, 0.3f, 1.0f };
+    //     colors[ImGuiCol_FrameBgActive] = ImVec4{ 0.15f, 0.15f, 0.15f, 1.0f };
 
-        colors[ImGuiCol_Tab] = ImVec4{ 0.15f, 0.15f, 0.15f, 1.0f };
-        colors[ImGuiCol_TabHovered] = ImVec4{ 0.38f, 0.38f, 0.38f, 1.0f };
-        colors[ImGuiCol_TabActive] = ImVec4{ 0.28f, 0.28f, 0.28f, 1.0f };
-        colors[ImGuiCol_TabUnfocused] = ImVec4{ 0.15f, 0.15f, 0.15f, 1.0f };
-        colors[ImGuiCol_TabUnfocusedActive] = ImVec4{ 0.2f, 0.2f, 0.2f, 1.0f };
+    //     colors[ImGuiCol_Tab] = ImVec4{ 0.15f, 0.15f, 0.15f, 1.0f };
+    //     colors[ImGuiCol_TabHovered] = ImVec4{ 0.38f, 0.38f, 0.38f, 1.0f };
+    //     colors[ImGuiCol_TabActive] = ImVec4{ 0.28f, 0.28f, 0.28f, 1.0f };
+    //     colors[ImGuiCol_TabUnfocused] = ImVec4{ 0.15f, 0.15f, 0.15f, 1.0f };
+    //     colors[ImGuiCol_TabUnfocusedActive] = ImVec4{ 0.2f, 0.2f, 0.2f, 1.0f };
 
-        colors[ImGuiCol_TitleBg] = ImVec4{ 0.15f, 0.15f, 0.15f, 1.0f };
-        colors[ImGuiCol_TitleBgActive] = ImVec4{ 0.15f, 0.15f, 0.15f, 1.0f };
-        colors[ImGuiCol_TitleBgCollapsed] = ImVec4{ 0.15f, 0.15f, 0.15f, 1.0f };
+    //     colors[ImGuiCol_TitleBg] = ImVec4{ 0.15f, 0.15f, 0.15f, 1.0f };
+    //     colors[ImGuiCol_TitleBgActive] = ImVec4{ 0.15f, 0.15f, 0.15f, 1.0f };
+    //     colors[ImGuiCol_TitleBgCollapsed] = ImVec4{ 0.15f, 0.15f, 0.15f, 1.0f };
 
-        ImGuiStyle& style = ImGui::GetStyle();
-        if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
-            style.WindowRounding = 0.0f;
-            style.Colors[ImGuiCol_WindowBg].w = 1.0f;
-        }
-        // clang-format on
-    }
+    //     ImGuiStyle& style = ImGui::GetStyle();
+    //     if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
+    //         style.WindowRounding = 0.0f;
+    //         style.Colors[ImGuiCol_WindowBg].w = 1.0f;
+    //     }
+    //     // clang-format on
+    // }
+
+    SetupImGuiStyle(false, 1.0f);
 
     // Setup Platform/Renderer backends
     ImGui_ImplGlfw_InitForOpenGL(window, true);

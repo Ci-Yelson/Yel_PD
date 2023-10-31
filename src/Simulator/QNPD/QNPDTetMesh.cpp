@@ -187,24 +187,71 @@ QNPDTetMesh::QNPDTetMesh(std::string meshURL)
         // spdlog::info(">>>After QNPDTetMesh::init() - ok 3");
         spdlog::info(">>>After QNPDTetMesh::init()");
     }
+
+    { // For uniform show data - Establish neighbourhood structure for tets or triangles
+        m_adjVerts1rd.resize(m_positions.rows());
+        m_adjVerts2rd.resize(m_positions.rows());
+        for (int i = 0; i < m_tets.rows(); i++) {
+            for (int j = 0; j < 4; j++) {
+                for (int k = j + 1; k < 4; k++) {
+                    m_adjVerts1rd[m_tets(i, j)].push_back(m_tets(i, k));
+                    m_adjVerts1rd[m_tets(i, k)].push_back(m_tets(i, j));
+                }
+            }
+        }
+        for (int v = 0; v < m_positions.rows(); v++) {
+            for (auto nv1 : m_adjVerts1rd[v]) {
+                {
+                    auto fd = std::find(m_adjVerts2rd[v].begin(), m_adjVerts2rd[v].end(), nv1);
+                    if (fd == m_adjVerts2rd[v].end()) {
+                        m_adjVerts2rd[v].push_back(nv1);
+                    }
+                }
+                for (auto nv2 : m_adjVerts1rd[nv1]) {
+                    auto fd = std::find(m_adjVerts2rd[v].begin(), m_adjVerts2rd[v].end(), nv2);
+                    if (fd == m_adjVerts2rd[v].end()) {
+                        m_adjVerts2rd[v].push_back(nv2);
+                    }
+                }
+            }
+        }
+        // Build tetsPerVertex
+        m_tetsPerVertex.clear();
+        m_tetsPerVertex.resize(m_positions.rows());
+        for (int i = 0; i < m_tets.rows(); i++) {
+            for (int v = 0; v < 4; v++) {
+                unsigned int vInd = m_tets(i, v);
+                m_tetsPerVertex[vInd].push_back({ i, v });
+            }
+        }
+    }
 }
 
-void QNPDTetMesh::IGL_SetMesh(igl::opengl::glfw::Viewer* viewer)
+void QNPDTetMesh::IGL_SetMesh(igl::opengl::glfw::Viewer* viewer, Eigen::MatrixXd colorMapData)
 {
+    // ==================== Compute color ====================
+    {
+        m_colors.resize(m_positions.rows(), 1);
+        // [todo]
+        // Eigen::MatrixXd disp_norms = (m_positions - m_restpose_positions).cast<double>().rowwise().norm();
+        Eigen::MatrixXd disp_norms = colorMapData;
+        // spdlog::info(">>> DISP_NORMS - MIN = {}, MAX = {}", disp_norms.minCoeff(), disp_norms.maxCoeff());
+        disp_norms = (disp_norms.array() >= PD_CUTOFF).select(disp_norms, 0);
+        // spdlog::info(">>> DISP_NORMS - MIN = {}, MAX = {}", disp_norms.minCoeff(), disp_norms.maxCoeff());
+        disp_norms /= disp_norms.maxCoeff();
+        igl::jet(disp_norms, false, m_colors);
+        // spdlog::info(">>> M_COLORS Size = ({}, {})", m_colors.rows(), m_colors.cols());
+        // spdlog::info(">>> M_COLORS - MAX = {}", m_colors.maxCoeff());
+    }
+
+        // ==================== Set mesh data ====================
+
     if (m_meshID == -1) {
         m_meshID = viewer->append_mesh(true);
     }
     viewer->data(m_meshID).clear();
     viewer->data(m_meshID).point_size = 1.0f;
     viewer->data(m_meshID).set_mesh(m_positions.cast<double>(), m_triangles);
-    { // Compute color
-        m_colors.resize(m_positions.rows(), m_positions.cols());
-        // [todo]
-        Eigen::MatrixXd disp_norms = (m_positions - m_restpose_positions).cast<double>().rowwise().norm();
-        disp_norms /= disp_norms.maxCoeff();
-
-        igl::jet(disp_norms, false, m_colors);
-    }
     viewer->data(m_meshID).set_colors(m_colors.cast<double>());
 
     if (g_InteractState.draggingState.isDragging && (viewer->core().is_animating || g_InteractState.isSingleStep)) {

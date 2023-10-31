@@ -93,6 +93,7 @@ bool PDViewer::pre_draw()
 
         { // update mesh data
             PROFILE("IGL_SetMesh");
+            Set_FloorMesh();
             m_sim->IGL_SetMesh(viewer);
         }
         {
@@ -165,19 +166,19 @@ bool PDViewer::pre_draw()
     }
 
     { // Camera test
-        // std::cout << "=================================================\n";
-        // std::cout << "Camera Info:\n";
-        // std::cout << "  camera_center: " << viewer->core().camera_center.transpose() << "\n";
-        // std::cout << "  camera_translation: " << viewer->core().camera_translation.transpose() << "\n";
-        // std::cout << "  camera_eye: " << viewer->core().camera_eye.transpose() << "\n";
-        // std::cout << "  camera_up: " << viewer->core().camera_up.transpose() << "\n";
-        // std::cout << "  camera_view_angle: " << viewer->core().camera_view_angle << "\n";
-        // std::cout << "  camera_base_zoom: " << viewer->core().camera_base_zoom << "\n";
-        // std::cout << "  camera_zoom: " << viewer->core().camera_zoom << "\n";
-        // std::cout << "  camera_dnear: " << viewer->core().camera_dnear << "\n";
-        // std::cout << "  camera_dfar: " << viewer->core().camera_dfar << "\n";
-        // std::cout << "  trackball_angle: " << viewer->core().trackball_angle << "\n";
-        // std::cout << "=================================================\n";
+      // std::cout << "=================================================\n";
+      // std::cout << "Camera Info:\n";
+      // std::cout << "  camera_center: " << viewer->core().camera_center.transpose() << "\n";
+      // std::cout << "  camera_translation: " << viewer->core().camera_translation.transpose() << "\n";
+      // std::cout << "  camera_eye: " << viewer->core().camera_eye.transpose() << "\n";
+      // std::cout << "  camera_up: " << viewer->core().camera_up.transpose() << "\n";
+      // std::cout << "  camera_view_angle: " << viewer->core().camera_view_angle << "\n";
+      // std::cout << "  camera_base_zoom: " << viewer->core().camera_base_zoom << "\n";
+      // std::cout << "  camera_zoom: " << viewer->core().camera_zoom << "\n";
+      // std::cout << "  camera_dnear: " << viewer->core().camera_dnear << "\n";
+      // std::cout << "  camera_dfar: " << viewer->core().camera_dfar << "\n";
+      // std::cout << "  trackball_angle: " << viewer->core().trackball_angle << "\n";
+      // std::cout << "=================================================\n";
     }
 
     m_frameTimer.stopStopWatch();
@@ -189,29 +190,6 @@ void PDViewer::Setup()
     // -- After g_Viewer.launch_init() - assert(viewer!=null);
     // Config floor mesh for draw
     spdlog::info("> PDViewer::setup - Before");
-    {
-        if (m_floorMeshID == -1) {
-            spdlog::info("> PDViewer::setup - m_floorMeshID = {}", m_floorMeshID);
-            m_floorMeshID = viewer->append_mesh(g_InteractState.isFloorActive);
-            spdlog::info("> PDViewer::setup - m_floorMeshID = {}", m_floorMeshID);
-        }
-        double gridSize = m_floorGridSize;
-        double step = gridSize / 5;
-        Eigen::RowVector3d C;
-        for (double f = -gridSize; f <= gridSize; f += step) {
-            double y = 0.;
-            Eigen::RowVector3d p1 = { f, y, -gridSize };
-            Eigen::RowVector3d p2 = { f, y, gridSize };
-            Eigen::RowVector3d p3 = { -gridSize, y, f };
-            Eigen::RowVector3d p4 = { gridSize, y, f };
-            if (std::abs(f) < 1e-12)
-                C = { 0.0, 0.0, 0.0 };
-            else
-                C = { 0.8, 0.8, 0.8 };
-            viewer->data(m_floorMeshID).add_edges(p1, p2, C);
-            viewer->data(m_floorMeshID).add_edges(p3, p4, C);
-        }
-    }
     {
         if (m_interactMeshID == -1) {
             m_interactMeshID = viewer->append_mesh(true);
@@ -227,6 +205,34 @@ void PDViewer::Reset()
     viewer->core().is_animating = false;
 
     m_sim->Reset();
+}
+
+void PDViewer::Set_FloorMesh()
+{
+    if (m_floorMeshID == -1) {
+        m_floorMeshID = viewer->append_mesh(g_InteractState.isFloorActive);
+        spdlog::info("> PDViewer::Set_FloorMesh - m_floorMeshID = {}", m_floorMeshID);
+    }
+    viewer->data(m_floorMeshID).clear();
+
+    if (!g_InteractState.isFloorActive) return;
+
+    double gridSize = m_floorGridSize;
+    double step = gridSize / 5;
+    Eigen::RowVector3d C;
+    for (double f = -gridSize; f <= gridSize; f += step) {
+        double y = 0.;
+        Eigen::RowVector3d p1 = { f, y, -gridSize };
+        Eigen::RowVector3d p2 = { f, y, gridSize };
+        Eigen::RowVector3d p3 = { -gridSize, y, f };
+        Eigen::RowVector3d p4 = { gridSize, y, f };
+        if (std::abs(f) < 1e-12)
+            C = { 0.0, 0.0, 0.0 };
+        else
+            C = { 0.8, 0.8, 0.8 };
+        viewer->data(m_floorMeshID).add_edges(p1, p2, C);
+        viewer->data(m_floorMeshID).add_edges(p3, p4, C);
+    }
 }
 
 // ====================================================================================================
@@ -310,6 +316,7 @@ void PDViewer::SimulatorInfoWindow()
             m_sim->UpdateTimeStep();
         }
         ImGui::InputInt("Simulator Iterations", &g_InteractState.numIterations);
+        ImGui::Checkbox("Floor Active", &g_InteractState.isFloorActive);
         if (g_InteractState.simulatorType == "HRPD") {
             auto hrpd_simulator = dynamic_cast<HRPDSimulator*>(m_sim.get());
             if (ImGui::CollapsingHeader("HRPD Params", ImGuiTreeNodeFlags_DefaultOpen)) {
@@ -452,10 +459,10 @@ void PDViewer::OperationWindow()
 
     { // Operation objects
         auto HRPD_sim = dynamic_cast<HRPDSimulator*>(m_sim.get());
-        if (ImGui::CollapsingHeader("Operation Objects", ImGuiTreeNodeFlags_DefaultOpen) && HRPD_sim) {
+        if (ImGui::CollapsingHeader("Operation Objects", ImGuiTreeNodeFlags_DefaultOpen)) {
             // obj list
-            auto& objs = HRPD_sim->m_OpManager.m_operationObjects;
-            auto& objSelectInd = HRPD_sim->m_OpManager.m_selectObjectIndex;
+            auto& objs = m_sim->m_OpManager.m_operationObjects;
+            auto& objSelectInd = m_sim->m_OpManager.m_selectObjectIndex;
             if (objs.size()) {
                 ImGui::Separator();
                 for (int i = 0; i < objs.size(); i++) {
@@ -469,7 +476,7 @@ void PDViewer::OperationWindow()
                         }
                         else {
                             objSelectInd = i;
-                            g_Gizmo.T = HRPD_sim->m_OpManager.m_operationObjects[objSelectInd]->m_gizmoT.cast<float>();
+                            g_Gizmo.T = m_sim->m_OpManager.m_operationObjects[objSelectInd]->m_gizmoT.cast<float>();
                         }
                     }
                 }
@@ -480,21 +487,21 @@ void PDViewer::OperationWindow()
             ImGui::Combo("Type", &objTypeInd, OperationObjectTypeStrs, IM_ARRAYSIZE(OperationObjectTypeStrs));
             if (ImGui::Button(" + ", buttonSize)) {
                 // spdlog::info(">>> Add object - type = {}", OperationObjectTypeStrs[objTypeInd]);
-                HRPD_sim->m_OpManager.AddOperationObject(OperationObjectTypeStrs[objTypeInd]);
+                m_sim->m_OpManager.AddOperationObject(HRPD_sim->m_mesh->m_positions, OperationObjectTypeStrs[objTypeInd]);
             }
-            if (HRPD_sim->m_OpManager.m_selectObjectIndex != -1) {
+            if (m_sim->m_OpManager.m_selectObjectIndex != -1) {
                 ImGui::SameLine();
                 if (ImGui::Button("Del", buttonSize)) {
-                    // HRPD_sim->m_OpManager.del...
-                    HRPD_sim->m_OpManager.DelOperationObject(&g_Viewer);
+                    // m_sim->m_OpManager.del...
+                    m_sim->m_OpManager.DelOperationObject(&g_Viewer);
                 }
             }
         }
 
         ImGui::Separator();
 
-        if (ImGui::CollapsingHeader("Transform", ImGuiTreeNodeFlags_DefaultOpen) && HRPD_sim) {
-            if (HRPD_sim->m_OpManager.m_selectObjectIndex == -1) {
+        if (ImGui::CollapsingHeader("Transform", ImGuiTreeNodeFlags_DefaultOpen)) {
+            if (m_sim->m_OpManager.m_selectObjectIndex == -1) {
                 ImGui::TextDisabled("No entity selected.");
             }
             else {
@@ -512,7 +519,7 @@ void PDViewer::OperationWindow()
                 // ################### Object info ###################
                 PD::PD3dVector curLength;
                 // Center
-                auto& entity = HRPD_sim->m_OpManager.m_operationObjects[HRPD_sim->m_OpManager.m_selectObjectIndex];
+                auto& entity = m_sim->m_OpManager.m_operationObjects[m_sim->m_OpManager.m_selectObjectIndex];
                 float _center[3];
                 for (int i = 0; i < 3; i++) _center[i] = entity->m_center(i);
                 ImGui::InputFloat3("Object Center", _center);
@@ -604,8 +611,13 @@ void PDViewer::OperationWindow()
 
             if (ImGui::Button("Load Preset", buttonSize)) {
                 if (HRPD_sim) {
-                    HRPD_sim->m_OpManager.m_presetIndex = curPresetIndex;
-                    HRPD_sim->m_OpManager.SetupPreset(&g_Viewer);
+                    m_sim->m_OpManager.m_presetIndex = curPresetIndex;
+                    m_sim->m_OpManager.SetupPreset(HRPD_sim->m_mesh->m_positions, &g_Viewer);
+                }
+                auto QNPD_sim = dynamic_cast<QNPDSimulator*>(m_sim.get());
+                if (QNPD_sim) {
+                    QNPD_sim->m_OpManager.m_presetIndex = curPresetIndex;
+                    QNPD_sim->m_OpManager.SetupPreset(QNPD_sim->m_mesh->m_positions, &g_Viewer);
                 }
             }
         }

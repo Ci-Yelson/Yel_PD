@@ -45,7 +45,9 @@ int main(int argc, char** argv)
 
     g_Viewer.core().is_animating = false;
     g_Viewer.core().animation_max_fps = 30;
-    g_Viewer.core().background_color << 100. / 255, 100. / 255, 100. / 255, 1.0;
+    // g_Viewer.core().background_color << 100. / 255, 100. / 255, 100. / 255, 1.0;
+    g_Viewer.core().background_color << 217. / 255, 217. / 255, 217. / 255, 1.0;
+    // g_Viewer.core().background_color << 170. / 255, 170. / 255, 170. / 255, 1.0;
 
     g_Viewer.launch_init(true, false, "CAD Simulator");
 

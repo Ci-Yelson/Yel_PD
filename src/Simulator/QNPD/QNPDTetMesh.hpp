@@ -37,6 +37,10 @@ struct QNPDTetMesh {
     PDSparseMatrix m_mass_matrix_1d; // mxm
     PDSparseMatrix m_inv_mass_matrix_1d; // mxm
 
+    // ---- For uniform show data
+    std::vector<std::vector<int>> m_adjVerts1rd, m_adjVerts2rd;
+    std::vector<std::vector<std::pair<unsigned int, unsigned int>>> m_tetsPerVertex;
+
 public:
     QNPDTetMesh(std::string meshURL);
 
@@ -48,7 +52,7 @@ public:
         m_previous_velocities_vec = m_current_velocities_vec;
         m_positions = m_restpose_positions;
     }
-    void IGL_SetMesh(igl::opengl::glfw::Viewer* viewer);
+    void IGL_SetMesh(igl::opengl::glfw::Viewer* viewer, Eigen::MatrixXd colorMapData);
 };
 
 }

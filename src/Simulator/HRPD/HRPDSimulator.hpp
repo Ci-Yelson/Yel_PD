@@ -66,7 +66,6 @@ struct HRPDSimulator : public PDSimulator {
 
 public:
     // ----------------- UI-Operation -----------------
-    OperationManager m_OpManager;
     // For Color Map
     int m_colorMapType = 0;
     bool isUniformColorMap = true;

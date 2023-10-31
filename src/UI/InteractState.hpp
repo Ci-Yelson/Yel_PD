@@ -78,10 +78,11 @@ struct InteractState {
         std::string integration_method = "INTEGRATION_IMPLICIT_EULER";
         std::string optimization_method = "OPTIMIZATION_METHOD_LBFGS";
         int iterative_solver_max_iteration = 10;
+
         double stiffness_attachment = 120;
-        double stiffness_stretch = 80;
-        double stiffness_bending = 20;
-        double stiffness_kappa = 100;
+        double stiffness_stretch = 80;      // mu
+        double stiffness_bending = 20;      // lambda
+        double stiffness_kappa = 100;       // kappa
         double stiffness_laplacian = 2 * stiffness_stretch + stiffness_bending;
         double damping_coefficient = 0.001;
 

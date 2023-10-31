@@ -3,6 +3,7 @@
 
 #include "QNPDConstraint.hpp"
 #include "QNPDTetMesh.hpp"
+#include "Simulator/HRPD/HRPDOperationManager.hpp"
 #include "Simulator/PDSimulator.hpp"
 #include "Simulator/PDTypeDef.hpp"
 
@@ -54,6 +55,7 @@ struct QNPDSimulator : public PDSimulator {
     // 0.5(x-y)^2 M (x-y) + (c) * h^2 * E(x) - h^2 * x^T * z;
     PDVector m_y;
     PDVector m_z;
+    PDVector ms_x;
 
     // external force (gravity, wind, etc...)
     PDVector m_external_force;
@@ -109,8 +111,8 @@ struct QNPDSimulator : public PDSimulator {
     PDScalar m_damping_coefficient{ 0.001 };
 
     IntegrationMethod m_integration_method = INTEGRATION_IMPLICIT_EULER;
-    // OptimizationMethod m_optimization_method = OPTIMIZATION_METHOD_LBFGS;
-    OptimizationMethod m_optimization_method = OPTIMIZATION_METHOD_NEWTON;
+    OptimizationMethod m_optimization_method = OPTIMIZATION_METHOD_LBFGS;
+    // OptimizationMethod m_optimization_method = OPTIMIZATION_METHOD_NEWTON;
     SolverType m_solver_type{ SOLVER_TYPE_DIRECT_LLT };
     int m_iterative_solver_max_iteration{ 10 };
 
@@ -122,11 +124,13 @@ struct QNPDSimulator : public PDSimulator {
     PDScalar m_stiffness_stretch{ 80 }; // mu
     // PDScalar m_stiffness_high{20};
     PDScalar m_stiffness_bending{ 20 }; // lambda
-    PDScalar m_stiffness_kappa{ 100 };  // kappa
+    PDScalar m_stiffness_kappa{ 100 }; // kappa
     PDScalar m_stiffness_laplacian{ 2 * m_stiffness_stretch + m_stiffness_bending };
     bool m_stiffness_auto_laplacian_stiffness{ true };
 
     int m_current_iteration{ 0 };
+
+    int m_frameCount = 0;
 
     bool m_verbose_show_converge{ false };
     bool m_verbose_show_factorization_warning{ true };
@@ -141,7 +145,11 @@ public:
     void Step() override;
     void Reset() override;
 
-    void IGL_SetMesh(igl::opengl::glfw::Viewer* viewer) override { m_mesh->IGL_SetMesh(viewer); }
+    void IGL_SetMesh(igl::opengl::glfw::Viewer* viewer) override
+    {
+        m_mesh->IGL_SetMesh(viewer, GetColorMapData());
+        m_OpManager.IGL_SetMesh(viewer);
+    }
 
     const PDPositions& GetRestPositions() override { return m_mesh->m_restpose_positions; }
     const PDPositions& GetPositions() override { return m_mesh->m_positions; }
@@ -187,6 +195,10 @@ private:
     void LBFGSKernelLinearSolve(PDVector& r, PDVector rhs, PDScalar scaled_identity_constant); // Ar = rhs
     PDScalar lineSearch(const PDVector& x, const PDVector& gradient_dir, const PDVector& descent_dir);
     PDScalar linesearchWithPrefetchedEnergyAndGradientComputing(const PDVector& x, const PDScalar current_energy, const PDVector& gradient_dir, const PDVector& descent_dir, PDScalar& next_energy, PDVector& next_gradient_dir);
+
+public:
+    bool isUniformColorMap = false;
+    Eigen::MatrixXd GetColorMapData();
 };
 
 }

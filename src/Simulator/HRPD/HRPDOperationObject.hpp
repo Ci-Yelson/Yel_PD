@@ -64,6 +64,7 @@ public:
 struct CollisionObject : public OperationObject {
 public:
     virtual bool ResolveCollision(PD3dVector& pos) = 0;
+    virtual bool ResolveCollision(PD3dVector& pos, PD3dVector& normal) = 0;
 };
 
 // ========================== Specific Object ==========================
@@ -108,6 +109,7 @@ public:
 public:
     void Step(double dt) override;
     bool ResolveCollision(PD3dVector& pos) override;
+    bool ResolveCollision(PD3dVector& pos, PD3dVector& normal) override;
     void IGL_SetMesh(igl::opengl::glfw::Viewer* viewer) override;
 };
 
@@ -126,6 +128,7 @@ public:
 public:
     void Step(double dt) override;
     bool ResolveCollision(PD3dVector& pos) override;
+    bool ResolveCollision(PD3dVector& pos, PD3dVector& normal) override;
     void IGL_SetMesh(igl::opengl::glfw::Viewer* viewer) override;
 };
 

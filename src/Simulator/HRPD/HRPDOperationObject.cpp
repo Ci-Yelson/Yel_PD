@@ -1,4 +1,5 @@
 #include "Simulator/HRPD/HRPDOperationObject.hpp"
+#include "Simulator/PDTypeDef.hpp"
 #include "spdlog/spdlog.h"
 
 #include "UI/InteractState.hpp"
@@ -320,6 +321,61 @@ bool CollisionCube::ResolveCollision(PD3dVector& pos)
     return true;
 }
 
+bool CollisionCube::ResolveCollision(PD3dVector& pos, PD3dVector& normal)
+{
+    if (!isInside(pos)) return false;
+    Eigen::RowVector3d mi = m_verts.colwise().minCoeff();
+    Eigen::RowVector3d mx = m_verts.colwise().maxCoeff();
+
+    double strength = 1.0;
+
+    if (m_isTranslate == true) {
+        // X
+        if (m_translateDir.x() != 0) {
+            if (m_translateDir.x() > 0)
+                pos.x() += strength * ((mx.x() + g_InteractState.dHat) - pos.x()), normal = {1,0,0};
+            else
+                pos.x() += strength * ((mi.x() - g_InteractState.dHat) - pos.x()), normal = {-1,0,0};
+        }
+        // Y
+        if (m_translateDir.y() != 0) {
+            if (m_translateDir.y() > 0)
+                pos.y() += strength * ((mx.y() + g_InteractState.dHat) - pos.y()), normal = {0,1,0};
+            else
+                pos.y() += strength * ((mi.y() - g_InteractState.dHat) - pos.y()), normal = {0,-1,0};
+        }
+        // Z
+        if (m_translateDir.z() != 0) {
+            if (m_translateDir.z() > 0)
+                pos.z() += strength * ((mx.z() + g_InteractState.dHat) - pos.z()), normal = {0,0,1};
+            else
+                pos.z() += strength * ((mi.z() - g_InteractState.dHat) - pos.z()), normal = {0,0,-1};
+        }
+    }
+    else if (m_isRotate == true) {
+        PD3dVector planeV = m_verts.row(m_rotatePlaneVertInd[0]);
+        double newDotlen = (pos - planeV).dot(m_rotatePlaneNorm) + g_InteractState.dHat;
+        if (newDotlen < 0) {
+            pos -= strength * newDotlen * m_rotatePlaneNorm;
+            normal = (newDotlen * m_rotatePlaneNorm).normalized();
+        }
+    }
+    else {
+        // simplest way, but may not correct
+        if (mi.x() < pos.x() && pos.x() < mx.x()) {
+            pos.x() = (mx.x() - pos.x() > pos.x() - mi.x()) ? (mi.x() - g_InteractState.dHat) : (mx.x() + g_InteractState.dHat);
+        }
+        if (mi.y() < pos.y() && pos.y() < mx.y()) {
+            pos.y() = (mx.y() - pos.y() > pos.y() - mi.y()) ? (mi.y() - g_InteractState.dHat) : (mx.y() + g_InteractState.dHat);
+        }
+        if (mi.z() < pos.z() && pos.z() < mx.z()) {
+            pos.z() = (mx.z() - pos.z() > pos.z() - mi.z()) ? (mi.z() - g_InteractState.dHat) : (mx.z() + g_InteractState.dHat);
+        }
+    }
+
+    return true;
+}
+
 void CollisionCube::IGL_SetMesh(igl::opengl::glfw::Viewer* viewer)
 {
     if (m_meshID == -1) {
@@ -411,6 +467,18 @@ bool CollisionSphere::ResolveCollision(PD3dVector& pos)
 {
     if ((pos - m_center).norm() < m_length.x() * 0.5) {
         PD3dVector dir = (pos - m_center).normalized();
+        double strength = m_length.x() * 0.5 + g_InteractState.dHat;
+        pos = m_center + strength * dir;
+        return true;
+    }
+    return false;
+}
+
+bool CollisionSphere::ResolveCollision(PD3dVector& pos, PD3dVector& normal)
+{
+    if ((pos - m_center).norm() < m_length.x() * 0.5) {
+        PD3dVector dir = (pos - m_center).normalized();
+        normal = dir;
         double strength = m_length.x() * 0.5 + g_InteractState.dHat;
         pos = m_center + strength * dir;
         return true;

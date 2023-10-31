@@ -78,6 +78,8 @@ void QNPDSimulator::LoadParamsAndApply()
 
 void QNPDSimulator::Reset()
 {
+    m_frameCount = 0;
+
     m_mesh->m_total_mass = 1;
     m_mesh->ResetPositions();
 
@@ -86,6 +88,10 @@ void QNPDSimulator::Reset()
     // lbfgs
     m_lbfgs.restart_every_frame = false;
     m_lbfgs.need_update_H0 = true;
+
+    {
+        m_OpManager.Reset();
+    }
 }
 
 void QNPDSimulator::Step()
@@ -178,7 +184,17 @@ void QNPDSimulator::Step()
         // timestep++;
     }
 
+    { // Operation objects step
+        PROFILE_STEP("OP_OBJECTS_STEP");
+        // if (_debug) spdlog::info("> HRPDSimulator::Step() - OP_OBJECTS_STEP");
+        m_OpManager.Step(m_dt);
+    }
+
+    ms_x = x;
+
     m_dt = old_h;
+
+    m_frameCount++;
     // spdlog::info(">>>After QNPDSimulator::step()");
 }
 
@@ -280,25 +296,25 @@ void QNPDSimulator::setupConstraints()
     setMaterialProperty(m_constraints);
 
     { // debug
-        std::ofstream f;
-        f.open("./debug/QNPD/mesh_info");
-        f << fmt::format("V nums = {}, Tet nums = {}\n", m_mesh->m_vertices_number, m_mesh->m_tets.rows());
-        for (int i = 0; i < m_mesh->m_positions.rows(); i++) {
-            f << fmt::format("V {}: ", i);
-            f << m_mesh->m_positions.row(i);
-            f << "\n";
-        }
-        for (int i = 0; i < m_mesh->m_tets.rows(); i++) {
-            f << fmt::format("Tet {}: ", i);
-            f << m_mesh->m_tets.row(i);
-            f << "\n";
-        }
-        f.close();
+      // std::ofstream f;
+      // f.open("./debug/QNPD/mesh_info");
+      // f << fmt::format("V nums = {}, Tet nums = {}\n", m_mesh->m_vertices_number, m_mesh->m_tets.rows());
+      // for (int i = 0; i < m_mesh->m_positions.rows(); i++) {
+      //     f << fmt::format("V {}: ", i);
+      //     f << m_mesh->m_positions.row(i);
+      //     f << "\n";
+      // }
+      // for (int i = 0; i < m_mesh->m_tets.rows(); i++) {
+      //     f << fmt::format("Tet {}: ", i);
+      //     f << m_mesh->m_tets.row(i);
+      //     f << "\n";
+      // }
+      // f.close();
 
-        f.open("./debug/QNPD/mass_vec");
-        f << fmt::format("Size = ({}, {})\n", mass_vec.rows(), mass_vec.cols());
-        f << mass_vec;
-        f.close();
+        // f.open("./debug/QNPD/mass_vec");
+        // f << fmt::format("Size = ({}, {})\n", mass_vec.rows(), mass_vec.cols());
+        // f << mass_vec;
+        // f.close();
 
         // PDMatrix mass_1d = m_mesh->m_mass_matrix_1d;
         // f.open("./debug/QNPD/mass_1d");
@@ -356,14 +372,59 @@ void QNPDSimulator::collisionDetection(const PDVector& x)
     }
 
     // Floor Constraint
+    // {
+    //     PD_PARALLEL_FOR
+    //     for (int i = 0; i < m_mesh->m_vertices_number; i++) {
+    //         if (x[3 * i + 1] < 0) {
+    //             EigenVector3 surface_point = { x[3 * i], 0, x[3 * i + 2] };
+    //             EigenVector3 normal{ 0, 1, 0 };
+    //             m_collision_constraints[i] = (QNPDPenaltyConstraint(1e2, i, surface_point, normal));
+    //         }
+    //     }
+    // }
+
+    // Collision handle
     {
         PD_PARALLEL_FOR
         for (int i = 0; i < m_mesh->m_vertices_number; i++) {
-            if (x[3 * i + 1] < 0) {
-                EigenVector3 surface_point = { x[3 * i], 0, x[3 * i + 2] };
-                EigenVector3 normal{ 0, 1, 0 };
-                m_collision_constraints[i] = (QNPDPenaltyConstraint(1e2, i, surface_point, normal));
+            // -- Floor
+            if (g_InteractState.isFloorActive) {
+                if (x[3 * i + 1] < 0) {
+                    EigenVector3 surface_point = { x[3 * i], 0, x[3 * i + 2] };
+                    EigenVector3 normal{ 0, 1, 0 };
+                    m_collision_constraints[i] = (QNPDPenaltyConstraint(1e2, i, surface_point, normal));
+                }
             }
+            // -- Collision
+            for (auto& obj : m_OpManager.m_operationObjects) {
+                auto colObj = std::dynamic_pointer_cast<CollisionObject>(obj);
+                if (colObj != nullptr) {
+                    PD3dVector posV = { x[3 * i], x[3 * i + 1], x[3 * i + 2] };
+                    EigenVector3 normal = { 0, 0, 0 };
+                    if (colObj->ResolveCollision(posV, normal)) {
+                        // spdlog::info(">>> Collision detect:");
+                        // std::cout << posV.transpose() << std::endl;
+
+                        // pos.row(v) = posV.transpose();
+                        EigenVector3 surface_point = posV;
+                        PD3dVector curV = { x[3 * i], x[3 * i + 1], x[3 * i + 2] };
+                        // EigenVector3 normal = (posV - curV).normalized();
+                        m_collision_constraints[i] = (QNPDPenaltyConstraint(1e2, i, surface_point, normal));
+                    }
+                }
+            }
+            // -- Grip
+            // for (auto& obj : m_OpManager.m_operationObjects) {
+            //     auto gripObj = std::dynamic_pointer_cast<GripObject>(obj);
+            //     if (gripObj != nullptr) {
+            //         PD3dVector posV = pos.row(v);
+            //         PD3dVector prevPosV = m_mesh->m_positions.row(m_subspaceBuilder.m_usedVertices[v]);
+            //         if (gripObj->ResolveGrip(posV)) {
+            //             gripCorrection = true;
+            //             pos.row(v) = prevPosV.transpose();
+            //         }
+            //     }
+            // }
         }
     }
 }
@@ -1269,6 +1330,45 @@ PDScalar QNPDSimulator::linesearchWithPrefetchedEnergyAndGradientComputing(const
 
     // TOCK(LLINESEARCH_TIMECOST);
     return t;
+}
+
+Eigen::MatrixXd QNPDSimulator::GetColorMapData()
+{
+    // if (m_colorMapType == 0) { // DISPLACEMENT
+    //     return (m_mesh->m_positions - m_mesh->m_restpose_positions).cast<double>().rowwise().norm();
+    // }
+    static Eigen::MatrixXd m_E(m_mesh->m_positions.rows(), 1);
+    if (m_frameCount % 5 == 0) {
+        std::vector<PDScalar> tetsE(m_constraints.size());
+        assert(m_constraints.size() == m_mesh->m_tets.rows());
+        PD_PARALLEL_FOR
+        for (int tInd = 0; tInd < m_constraints.size(); tInd++) {
+            tetsE[tInd] = m_constraints[tInd]->EvaluateEnergy(m_mesh->m_current_positions_vec);
+        }
+        Eigen::MatrixXd _E(m_mesh->m_positions.rows(), 1);
+        PD_PARALLEL_FOR
+        for (int v = 0; v < m_mesh->m_positions.rows(); v++) {
+            _E(v, 0) = 0;
+            for (auto tp : m_mesh->m_tetsPerVertex[v]) {
+                _E(v, 0) += tetsE[tp.first];
+            }
+            _E(v, 0) /= 4.0;
+        }
+        // if (isUniformColorMap) {
+        if (true) {
+            auto tmp = _E;
+            PD_PARALLEL_FOR
+            for (int v = 0; v < m_mesh->m_positions.rows(); v++) {
+                _E.row(v).setZero();
+                for (auto nv : m_mesh->m_adjVerts1rd[v]) {
+                    _E.row(v) += tmp.row(nv);
+                }
+                _E.row(v) /= (m_mesh->m_adjVerts1rd[v].size() + 1);
+            }
+        }
+        // spdlog::info(">>> QNPDSimulator::GetColorMapData()");
+        return m_E = _E.rowwise().norm();
+    }
 }
 
 }

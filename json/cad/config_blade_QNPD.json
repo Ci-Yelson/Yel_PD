@@ -1,5 +1,5 @@
 {
-    "meshURL": "models/cad/p360gm-bg-050-016-00-030-r-10_modified_2.obj",
+    "meshURL": "models/cad/blade.stl",
     "simulatorType": "QNPD",
     
     "QNPDParams": {

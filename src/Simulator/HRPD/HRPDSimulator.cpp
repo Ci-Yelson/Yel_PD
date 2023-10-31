@@ -28,8 +28,6 @@ namespace PD {
 HRPDSimulator::HRPDSimulator(std::shared_ptr<HRPDTetMesh> tetMesh)
     : m_mesh(tetMesh)
 {
-    m_OpManager.Setup(tetMesh);
-
     m_fExt.setZero(m_mesh->m_positions.rows(), 3);
     m_fGravity.setZero(m_mesh->m_positions.rows(), 3);
 

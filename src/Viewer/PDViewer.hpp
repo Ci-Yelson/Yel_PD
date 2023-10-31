@@ -58,6 +58,8 @@ public:
     // Stop animating and Reset simulator.
     void Reset();
 
+    void Set_FloorMesh();
+
 public: // -- override --
     // Call when g_Viewer.launch_init()
     void init(igl::opengl::glfw::Viewer* _viewer) override;

@@ -1,6 +1,6 @@
 {
-    "meshURL": "models/cad/p360gm-bg-050-016-00-030-r-10_modified_2.obj",
-    "simulatorType": "QNPD",
+    "meshURL": "models/cad/p360gm-bg-050-016-00-030-r-10_modified_2_173K.obj",
+    "simulatorType": "HRPD",
     
     "QNPDParams": {
         "stiffness_attachment": 12000,
@@ -8,12 +8,12 @@
         "stiffness_bending": 2000,
         "stiffness_kappa": 10000,
 
-        "gravityConstant": 0,
+        "gravityConstant": 1,
 
         "ls_enable_line_search": true
     },
 
-    "timeStep": 0.001,
+    "timeStep": 0.033,
     "isHyperReduced": false,
     "isMultiThreads": true,
     "interpolationFrameSize": 12,
@@ -21,7 +21,7 @@
     "sigmaMin": 1.00,
     "sigmaMax": 1.00,
     "massPerUnitArea": 2,
-    "gravityConstant": 0.00000,
+    "gravityConstant": 0.00007,
     "numIterations": 10,
     "numberSamplesForVertexPosSubspace": 150,
     "radiusMultiplierForPosSubspace": 1.1,

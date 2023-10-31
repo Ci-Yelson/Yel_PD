@@ -1,10 +1,16 @@
 #pragma once
 
 #include "PDTypeDef.hpp"
+#include "Simulator/HRPD/HRPDOperationManager.hpp"
 #include "igl/opengl/glfw/Viewer.h"
 
 namespace PD {
 struct PDSimulator {
+
+public:
+    // ----------------- UI-Operation -----------------
+    OperationManager m_OpManager;
+
 public:
     // todo
     virtual void LoadParamsAndApply() = 0;

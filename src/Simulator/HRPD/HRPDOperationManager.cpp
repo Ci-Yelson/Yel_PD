@@ -1,13 +1,14 @@
 #include "Simulator/HRPD/HRPDOperationManager.hpp"
 #include "Simulator/HRPD/HRPDOperationObject.hpp"
+#include "Simulator/PDTypeDef.hpp"
 
 namespace PD {
 
-void OperationManager::AddOperationObject(std::string objectTypeStr, double length)
+void OperationManager::AddOperationObject(PDPositions& V, std::string objectTypeStr, double length)
 {
     auto& objectTypeStrs = OperationObjectTypeStrs;
 
-    auto& V = m_mesh->m_positions;
+    // auto& V = m_mesh->m_positions;
     Eigen::RowVector3d mi = V.colwise().minCoeff();
     Eigen::RowVector3d mx = V.colwise().maxCoeff();
     if (length == -1) {
@@ -69,11 +70,11 @@ void OperationManager::IGL_SetMesh(igl::opengl::glfw::Viewer* viewer)
 }
 
 // ================================= Presets =================================
-void OperationManager::OperationSetupSphere()
+void OperationManager::OperationSetupSphere(PDPositions& V)
 {
     spdlog::info("### OperationSetupSphere");
 
-    auto& V = m_mesh->m_positions;
+    // auto& V = m_mesh->m_positions;
     Eigen::RowVector3d originMi = V.colwise().minCoeff();
     Eigen::RowVector3d originMx = V.colwise().maxCoeff();
 
@@ -113,31 +114,41 @@ void OperationManager::OperationSetupSphere()
     }
 }
 
-void OperationManager::OperationSetupCube()
+void OperationManager::OperationSetupCube(PDPositions& V)
 {
     spdlog::info("### OperationSetupCube");
 
-    auto& V = m_mesh->m_positions;
+    // auto& V = m_mesh->m_positions;
     Eigen::RowVector3d mi = V.colwise().minCoeff();
     Eigen::RowVector3d mx = V.colwise().maxCoeff();
 
-    double thickness = 0.01;
+    double thickness = 0.07;
 
     {
         // up
-        PD3dVector center = { (mx.x() + mi.x()) * 0.5, mx.y() + 0.5 * thickness, (mx.z() + mi.z()) * 0.5 };
-        PD3dVector length3d = { mx.x() - mi.x(), thickness, mx.z() - mi.z() };
+        PD3dVector center = { (mx.x() + mi.x()) * 0.5, mx.y() + 0.52 * thickness, (mx.z() + mi.z()) * 0.5 };
+        PD3dVector length3d = { (mx.x() - mi.x()) * 1.5, thickness, (mx.z() - mi.z()) * 1.5 };
         std::shared_ptr<CollisionCube> colObjPtr = std::make_shared<CollisionCube>(center, length3d);
         PD3dVector dir = { 0.0, -1.0, 0.0 };
         colObjPtr->initTranslate(dir, 0.03);
         m_operationObjects.push_back(colObjPtr);
     }
+
+    {
+        // down
+        PD3dVector center = { (mx.x() + mi.x()) * 0.5, mi.y() - 0.501 * thickness, (mx.z() + mi.z()) * 0.5 };
+        PD3dVector length3d = { (mx.x() - mi.x()) * 1.5, thickness, (mx.z() - mi.z()) * 1.5 };
+        std::shared_ptr<CollisionCube> colObjPtr = std::make_shared<CollisionCube>(center, length3d);
+        PD3dVector dir = { 0.0, 1.0, 0.0 };
+        colObjPtr->initTranslate(dir, 0.0);
+        m_operationObjects.push_back(colObjPtr);
+    }
 }
 
-void OperationManager::OperationSetupRotation()
+void OperationManager::OperationSetupRotation(PDPositions& V)
 {
     spdlog::info("### OperationSetupRotation");
-    auto& V = m_mesh->m_positions;
+    // auto& V = m_mesh->m_positions;
     Eigen::RowVector3d originMi = V.colwise().minCoeff();
     Eigen::RowVector3d originMx = V.colwise().maxCoeff();
 
