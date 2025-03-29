@@ -1,6 +1,3 @@
-#include "cuda_runtime.h"
-#include "cublas_v2.h"
-#include "cusparse_v2.h"
 #include "Simulator/PDTypeDef.hpp"
 
 // OP: L = U.T * M * U

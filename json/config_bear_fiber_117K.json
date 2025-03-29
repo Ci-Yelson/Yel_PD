@@ -1,5 +1,5 @@
 {
-    "meshURL": "models/bear_fiber_117K.stl",
+    "meshURL": "models/bear_fiber_117K_front.stl",
     "simulatorType": "HRPD",
     "timeStep": 16,
     "isHyperReduced": true,

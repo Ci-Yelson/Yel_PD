@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22.1)
-project(Yel_PD LANGUAGES CXX CUDA)
+project(Yel_PD LANGUAGES CXX)
 
 set(CMAKE_BUILD_TYPE Release)
 set(CMAKE_CXX_STANDARD 17)
@@ -13,7 +13,7 @@ if(CCACHE_PROGRAM)
 endif()
 
 ##################################################################
-set(PD_USE_CUDA ON CACHE BOOL "Enable CUDA" FORCE)
+set(PD_USE_CUDA OFF CACHE BOOL "Enable CUDA" FORCE)
 ##################################################################
 
 if (PD_USE_CUDA)
@@ -34,7 +34,7 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -w")
 add_compile_definitions(EIGEN_DONT_PARALLELIZE)
 
 add_executable(${PROJECT_NAME})
-file(GLOB_RECURSE SRC_FILES CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/src/*)
+file(GLOB_RECURSE SRC_FILES CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/src/*.cpp)
 target_sources(${PROJECT_NAME} PUBLIC ${SRC_FILES})
 target_include_directories(${PROJECT_NAME} PUBLIC ${PROJECT_SOURCE_DIR}/src)
 
@@ -75,8 +75,8 @@ target_link_libraries(${PROJECT_NAME} PUBLIC nlohmann_json::nlohmann_json)
 if (PD_USE_CUDA)
     find_package(CUDAToolkit REQUIRED)
     
-    # file(GLOB_RECURSE SRC_FILES CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/src/*.cu)
-    # target_sources(${PROJECT_NAME} PUBLIC ${SRC_FILES})
+    file(GLOB_RECURSE SRC_FILES CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/src/*.cu)
+    target_sources(${PROJECT_NAME} PUBLIC ${SRC_FILES})
     if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
         set(CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES "E:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.2\\include")
     elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
